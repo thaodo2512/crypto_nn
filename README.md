@@ -2,13 +2,13 @@
 
 Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 15‑minute BTCUSDT Parquet with QA and DuckDB helpers.
 
-## Quick Start
+## Quick Start (5m default)
 - Docker Compose (recommended)
   - Build: `docker compose build`
   - Set key: copy `secrets/.env.example` to `secrets/.env` and fill `COINGLASS_API_KEY`
-  - Ingest: `docker compose run --rm ingest`
-  - QA: `docker compose run --rm qa`
-- DuckDB view: `docker compose run --rm duckdb_view`
+  - Ingest 5m: `docker compose run --rm ingest_5m`
+  - QA 5m: `docker compose run --rm qa_5m`
+  - DuckDB view 5m: `docker compose run --rm duckdb_view_5m`
 
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
@@ -97,5 +97,6 @@ out_dir: data/parquet/15m/BTCUSDT
 - Adjust endpoints/params in `ingest_cg.py` if your tenant differs.
 
 ## DuckDB Catalog
-- Catalog DB: `meta/duckdb/p1.duckdb` with view `bars_15m` over the partition glob.
-- Create/update: `docker compose run --rm duckdb_view` (or `python qa_p1.py duckdb-view --glob ... --view bars_15m --db meta/duckdb/p1.duckdb`).
+- P1 5m: view `bars_5m` over `data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet`.
+  - Create/update: `docker compose run --rm duckdb_view_5m` (or `python duckview.py create --glob ... --view bars_5m --db meta/duckdb/p1.duckdb`).
+- P1 15m (legacy): view `bars_15m` over 15m lake via `docker compose run --rm duckdb_view`.
