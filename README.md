@@ -38,11 +38,13 @@ out_dir: data/parquet/15m/BTCUSDT
 ## Features & Storage
 - Features: rv_15m, cvd_perp_15m, perp_share_60m, oi_pctile_30d, funding_pctile_30d.
 - Funding reindexed to 15m with ffill ≤3 bars, flag: `funding_now_imputed`.
-- Parquet: partitioned by `y/m/d`, ZSTD level 3, key `[symbol, ts]` (UTC, 15m, right-closed/label=right).
+- Lake layout: `data/parquet/15m/{symbol}/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet` (one file/day, UTC, right-closed bars).
+- Parquet format: ZSTD(3), dictionary on; keys `[symbol, ts]`. Partitions: `y/m/d`.
+- Integrity per day: writes `MANIFEST.tsv` with sha256 and a `_SUCCESS` marker; re-writes by whole day for late data.
 
 ## QA
-- Reports last 180d: expected vs present bars, missing per column, imputation ratios (funding/OI), duplicates.
-- Fails if gaps > 0.5% or any imputation > 5%.
+- Reports last 180d: expected vs present bars, missing per column, imputation ratios (funding/OI), duplicates, NaN counts for derived features.
+- Gates (configurable via `qa_targets`): gaps < 0.5%, impute < 5% per feature, no NaN after transforms.
 
 ## Testing
 - Run: `pytest -q`
@@ -51,3 +53,7 @@ out_dir: data/parquet/15m/BTCUSDT
 ## Notes
 - No secrets committed; use `COINGLASS_API_KEY` for header `CG-API-KEY`.
 - Adjust endpoints/params in `ingest_cg.py` if your tenant differs.
+
+## DuckDB Catalog
+- Catalog DB: `meta/duckdb/p1.duckdb` with view `bars_15m` over the partition glob.
+- Create/update: `docker compose run --rm duckdb_view` (or `python qa_p1.py duckdb-view --glob ... --view bars_15m --db meta/duckdb/p1.duckdb`).
