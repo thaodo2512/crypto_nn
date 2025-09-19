@@ -137,6 +137,40 @@ class CGClient:
                 continue
         raise RuntimeError(f"Request failed after retries: {url}") from last_exc
 
+    @staticmethod
+    def _extract_records(payload: Any) -> List[Dict[str, Any]]:
+        """Heuristically extract a list of dict records from arbitrary JSON payloads.
+
+        Prefers lists whose items contain typical time/ohlc keys.
+        """
+        def score_list(lst: Any) -> int:
+            if not isinstance(lst, list) or not lst:
+                return -1
+            if not isinstance(lst[0], dict):
+                return -1
+            keys = set(lst[0].keys())
+            hits = len(keys & {"t", "ts", "timestamp", "o", "open", "c", "close"})
+            return hits
+
+        best: Tuple[int, Optional[List[Dict[str, Any]]]] = (-1, None)
+
+        def walk(obj: Any) -> None:
+            nonlocal best
+            if isinstance(obj, list):
+                s = score_list(obj)
+                if s > best[0]:
+                    best = (s, obj)  # type: ignore
+            elif isinstance(obj, dict):
+                for v in obj.values():
+                    walk(v)
+
+        walk(payload)
+        return best[1] or []
+
+    def get_list(self, path: str, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        payload = self.get_json(path, params)
+        return self._extract_records(payload)
+
     def get_paginated(
         self,
         path: str,

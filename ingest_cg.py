@@ -105,6 +105,20 @@ def _safe_parse(model, rows: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame.from_records(recs)
 
 
+def _normalize_exchange(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    mapping = {
+        "BINANCE": "Binance",
+        "BYBIT": "Bybit",
+        "BITGET": "Bitget",
+        "BITFINEX": "Bitfinex",
+        "HUOBI": "Huobi",
+        "OKX": "OKX",
+    }
+    return mapping.get(str(name).upper(), name)
+
+
 def _fetch_price_ohlc(
     client: CGClient,
     symbol: str,
@@ -116,17 +130,18 @@ def _fetch_price_ohlc(
 ) -> pd.DataFrame:
     # Endpoint naming may differ; these params are typical
     params = {"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe}
-    if exchange_preference:
-        params.update({"exchange": exchange_preference, "exchangeName": exchange_preference})
-    rows = client.get_paginated(path=endpoint_path, params=params)
+    ex = _normalize_exchange(exchange_preference)
+    if ex:
+        params.update({"exchange": ex, "exchangeName": ex})
+    rows = client.get_list(path=endpoint_path, params=params)
     df = _safe_parse(PriceBar, rows)
     return resample_15m_ohlcv(df)
 
 
-def _fetch_oi(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
-    rows = client.get_paginated(
+def _fetch_oi(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str, timeframe: str) -> pd.DataFrame:
+    rows = client.get_list(
         path=endpoint_path,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
+        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
     )
     df = _safe_parse(OIBar, rows)
     if df.empty:
@@ -189,9 +204,10 @@ def _fetch_taker_perp(
     exchange_preference: Optional[str] = None,
 ) -> pd.DataFrame:
     params = {"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe}
-    if exchange_preference:
-        params.update({"exchange": exchange_preference, "exchangeName": exchange_preference})
-    rows = client.get_paginated(path=endpoint_path, params=params)
+    ex = _normalize_exchange(exchange_preference)
+    if ex:
+        params.update({"exchange": ex, "exchangeName": ex})
+    rows = client.get_list(path=endpoint_path, params=params)
     df = _safe_parse(TakerVolumeBar, rows)
     if df.empty:
         return pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # typed
@@ -208,7 +224,7 @@ def _fetch_taker_spot_agg(
     timeframe: str,
 ) -> pd.DataFrame:
     # Aggregate spot and perp taker volumes if endpoint available
-    rows_spot = client.get_paginated(
+    rows_spot = client.get_list(
         path=endpoint_spot_agg,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
     )
@@ -219,7 +235,7 @@ def _fetch_taker_spot_agg(
             "taker_buy_usd": "spot_taker_buy_usd",
             "taker_sell_usd": "spot_taker_sell_usd",
         })
-    rows_perp_agg = client.get_paginated(
+    rows_perp_agg = client.get_list(
         path=endpoint_fut_agg,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
     )
@@ -388,7 +404,7 @@ def ingest_coinglass(
         raise typer.Exit(code=1)
 
     typer.echo("Fetching OI...")
-    oi15 = _fetch_oi(client, cfg.symbol, start_ms, end_ms, ep_oi)
+    oi15 = _fetch_oi(client, cfg.symbol, start_ms, end_ms, ep_oi, cfg.timeframe)
 
     typer.echo("Fetching funding...")
     funding15 = _fetch_funding(
