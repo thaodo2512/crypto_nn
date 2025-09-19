@@ -31,3 +31,10 @@ p4_sampling:
 	  --mask data/masks/ifgate_5m.parquet --W 144 --out data/aug/train_smote --seed 42
 	python cli_p4.py report-classmix \
 	  --pre data/train/ --post data/aug/train_smote/ --out reports/p4_classmix.json
+
+.PHONY: p5_train
+p5_train:
+	python cli_p5.py train --model gru --window 144 --cv walkforward --embargo 1D \
+	  --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+	  --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+	  --out "models/gru_5m" --seed 42 --folds 5
