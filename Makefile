@@ -18,3 +18,16 @@ p3_label:
 	  --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
 	  --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
 	  --report "reports/p3_qa_5m_80d.json"
+
+.PHONY: p4_sampling
+p4_sampling:
+	python cli_p4.py iforest-train \
+	  --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+	  --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+	  --out data/masks/ifgate_5m.parquet --q 0.995 --rolling-days 30 --seed 42
+	python cli_p4.py smote-windows \
+	  --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+	  --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+	  --mask data/masks/ifgate_5m.parquet --W 144 --out data/aug/train_smote --seed 42
+	python cli_p4.py report-classmix \
+	  --pre data/train/ --post data/aug/train_smote/ --out reports/p4_classmix.json
