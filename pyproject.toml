@@ -16,6 +16,8 @@ dependencies = [
   "duckdb>=1.0",
   "pydantic>=2.4",
   "PyYAML>=6.0",
+  "numpy>=1.26",
+  "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]
@@ -26,4 +28,7 @@ dev = [
 [project.scripts]
 ingest-cg = "ingest_cg:app"
 qa-p1 = "qa_p1:app"
-
+features-p2 = "features_p2:app"
+qa-p2 = "qa_p2:app"
+bench-features = "bench_features:app"
+duck-view = "duck_view:app"
