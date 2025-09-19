@@ -8,7 +8,18 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 15‑minut
   - Set key: copy `secrets/.env.example` to `secrets/.env` and fill `COINGLASS_API_KEY`
   - Ingest: `docker compose run --rm ingest`
   - QA: `docker compose run --rm qa`
-  - DuckDB view: `docker compose run --rm duckdb_view`
+- DuckDB view: `docker compose run --rm duckdb_view`
+
+## Incremental Ingestion
+- Skips days that already have `_SUCCESS` and `MANIFEST.tsv` markers.
+- Always refreshes the last N days (default `--refresh-tail 2`) to capture late data.
+- Force full reload: add `--force --no-skip-present`.
+- Debug requests/responses: use the `ingest_debug` service or add `--debug`.
+
+Examples
+- Refresh recent days only (defaults): `docker compose run --rm ingest`
+- Force full 180‑day reload: `docker compose run --rm ingest --force --no-skip-present`
+- Show request params and response keys: `docker compose run --rm ingest_debug`
 
 ## Local (optional)
 - Install: `pip install -r requirements.txt -r requirements-dev.txt`
@@ -41,6 +52,7 @@ out_dir: data/parquet/15m/BTCUSDT
 - Lake layout: `data/parquet/15m/{symbol}/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet` (one file/day, UTC, right-closed bars).
 - Parquet format: ZSTD(3), dictionary on; keys `[symbol, ts]`. Partitions: `y/m/d`.
 - Integrity per day: writes `MANIFEST.tsv` with sha256 and a `_SUCCESS` marker; re-writes by whole day for late data.
+ - Incremental: detects already‑ingested days via markers and only re‑fetches missing or tail days.
 
 ## QA
 - Reports last 180d: expected vs present bars, missing per column, imputation ratios (funding/OI), duplicates, NaN counts for derived features.
