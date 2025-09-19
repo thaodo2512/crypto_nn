@@ -14,6 +14,8 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Train P5: `make p5_train` (rebuild image first)
   - Policy P7: `docker compose run --rm p7_decide`
   - Export P8: `docker compose run --rm p8_export` (rebuild image first)
+  - Explain P10: `python explain_p10.py api --port 8081`
+  - Monitor P11: see Phase P11 commands below
 
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
@@ -159,3 +161,14 @@ out_dir: data/parquet/15m/BTCUSDT
 - Local: `python export_p8.py onnx --ckpt "models/gru_5m/*/best.pt" --fp16 --out export/model_5m_fp16.onnx --preproc conf/preproc_5m.yaml --calib models/ensemble_5m.json --window 144 --sample 16`
 - Outputs: `export/model_5m_fp16.onnx`, `reports/p8_parity.json` (MSE, sha256), logs in `logs/p8_export.log`.
 - Acceptance: parity MSE < 1e-3 and checksum logged.
+
+## Phase P10 – Explanations (Integrated Gradients)
+- Generate: `python explain_p10.py run --decision-id <id> --out explain/<id>.json --window-npy /path/to/window.npy --ckpt models/gru_5m/fold0/best.pt --steps 32 --topk 10 --target 1`
+- API: `python explain_p10.py api --port 8081` then `GET /explain?id=<id>` (TTL 30 days)
+- Output JSON: `{window, features, topk[{t,f,attr}], summary}` and `reports/p10_sample.json`.
+
+## Phase P11 – Monitoring, Drift, Regimes, Retrain
+- Drift + metrics: `python monitor_p11.py run --features "data/features/5m/**/part-*.parquet" --decisions "decisions/**/part-*.parquet" --out reports/`
+- Regimes (CUSUM on rv_5m): `python monitor_p11.py regimes --rv "data/features/5m/**/part-*.parquet" --out reports/p11_regimes.json`
+- Retrain trigger: `python monitor_p11.py retrain --config conf/retrain.yaml --out ops/retrain_trigger.json`
+- Outputs: `reports/p11_drift.json`, `reports/p11_regimes.json`, `ops/retrain_trigger.json`; MLflow logs with regime_id, thresholds, EV summary.
