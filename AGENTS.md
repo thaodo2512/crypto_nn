@@ -1,45 +1,39 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- `src/crypto_nn/` — core library code (models, data, utils).
-- `scripts/` — runnable entry points (e.g., `train.py`, `eval.py`).
-- `tests/` — unit/integration tests mirroring `src` layout.
-- `notebooks/` — exploration; clear outputs before commit.
-- `docs/` — short design notes/READMEs.
-- `.env.example` — environment variable template for local runs.
+## Project Structure
+- Root CLI modules per phase: `ingest_cg_5m.py` (P1), `features_p2.py` (P2), `label_p3.py` (P3),
+  `cli_p4.py` (P4), `cli_p5.py` (P5/P6), `export_p8.py` (P8), `policy_p7.py` (P7),
+  `service_p9.py` (P9), `explain_p10.py` (P10), `monitor_p11.py` (P11).
+- Utilities: `utils_cg.py`, transforms in `transforms.py`, sampling in `smote_train.py`, folds in `folds.py`.
+- Tests: `tests/test_*.py` per phase. Data lakes under `data/`, models under `models/`, export under `export/`.
+- Compose services in `docker-compose.yml`; Make targets in `Makefile`.
 
-## Build, Test, and Development Commands
-- Setup venv: `python -m venv .venv && source .venv/bin/activate`.
-- Install deps: `pip install -r requirements.txt -r requirements-dev.txt`.
-- Run tests: `pytest -q`.
-- Coverage: `pytest --cov=crypto_nn --cov-report=term-missing`.
-- Lint: `ruff check src tests`.
-- Format: `black src tests`.
-- Type check: `mypy src`.
-- Run locally: `python -m crypto_nn.cli` or `python scripts/train.py`.
+## Development & Testing
+- Python 3.11. Install deps: `pip install -r requirements.txt -r requirements-dev.txt`.
+- Run tests: `pytest -q` (set `PYTHONPATH=/app` when using Docker run).
+- Formatting: Black; linting: Ruff; type-hints encouraged; no secrets in repo.
 
-## Coding Style & Naming Conventions
-- Python 3.10+, 4-space indent, max line length 100.
-- Names: `snake_case` (functions/vars), `PascalCase` (classes), `UPPER_SNAKE_CASE` (constants).
-- Require type hints and docstrings; prefer small, cohesive modules.
-- Tools: Black (format), Ruff (lint/imports), Mypy (types, strict where practical).
+## Key Workflows (5m default)
+- P1 (ingest/QA/view): `docker compose run --rm ingest_5m | qa_5m | duckdb_view_5m`.
+- P2 (features): `docker compose run --rm features_build | features_validate | features_bench`.
+- P3 (labels): `make p3_label`.
+- P4 (sampling): `make p4_sampling`.
+- P5 (train): `make p5_train` (GRU, weighted CE, time-decay).
+- P6 (calibrate/ensemble/tune τ): `p6_calibrate`, `p6_ensemble`, `p6_tune_threshold` compose services.
+- P7 (policy): `python policy_p7.py decide --probs ... --atr ... --out decisions/`.
+- P8 (export ONNX FP16): `docker compose run --rm p8_export`.
+- P9 (service): `python service_p9.py api --onnx export/model_5m_fp16.onnx --port 8080`.
+- P10 (explain): `python explain_p10.py run ...` and `api --port 8081`.
+- P11 (monitor): `python monitor_p11.py run ...` and `regimes` then `retrain`.
 
-## Testing Guidelines
-- Framework: `pytest`; tests in `tests/` named `test_*.py` matching module paths.
-- Write fast, deterministic tests; seed randomness where relevant.
-- Target ≥85% statement coverage; include edge and failure paths.
+## Data & Storage
+- Parquet partitioning: `y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet`. Keys `[symbol, ts]` unique, UTC, right‑closed.
+- Integrity: per-day `MANIFEST.tsv` + `_SUCCESS`. Feature/label lake under `data/`; decisions under `decisions/`.
 
-## Commit & Pull Request Guidelines
-- Conventional Commits (e.g., `feat(model): add attention layer`, `fix(train): handle NaNs`).
-- PRs include: clear description, rationale, linked issues, before/after notes, and tests.
-- CI gate: format, lint, type-check, tests, and coverage threshold must pass.
+## Code Style & Conventions
+- 4-space indent, line length ≤ 100; `snake_case` names; `PascalCase` classes.
+- Keep implementations deterministic (seed=42) where applicable; tests must not rely on network or secrets.
 
-## Security & Configuration Tips
-- Never commit secrets; use environment variables. Commit `.env.example`, not `.env`.
-- Avoid large binaries; prefer small, reproducible datasets or downloads in setup scripts.
-
-## Agent-Specific Instructions
-- Keep patches minimal and focused; preserve layout under `src/crypto_nn` and `tests/`.
-- Update/add tests when behavior changes; do not lower coverage without approval.
-- Document new commands in this file or `docs/`.
-
+## PR & Commit
+- Conventional commits (feat/fix/chore/docs/test/refactor). Include tests and README/Compose updates for new CLIs.
+- Do not lower test coverage or relax acceptance gates without explicit approval.
