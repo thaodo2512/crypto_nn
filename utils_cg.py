@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import httpx
+from collections import deque
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError
 
@@ -50,11 +51,16 @@ class CGClient:
         timeout_s: float = 30.0,
         max_retries: int = 5,
         backoff_base: float = 0.5,
+        rpm_limit: Optional[int] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout_s
         self.max_retries = max_retries
         self.backoff_base = backoff_base
+        # Rate limiting (requests per 60s window). Default from env or param.
+        env_limit = os.getenv("CG_RPM_LIMIT")
+        self.rpm_limit: Optional[int] = rpm_limit if rpm_limit is not None else (int(env_limit) if env_limit else 300)
+        self._req_times: deque[float] = deque()
         api_key = os.getenv("COINGLASS_API_KEY")
         if not api_key:
             raise RuntimeError(
@@ -68,13 +74,37 @@ class CGClient:
             return path
         return f"{self.base_url}/{path.lstrip('/')}"
 
+    def _throttle(self) -> None:
+        """Block to respect rpm_limit in a sliding 60s window."""
+        if not self.rpm_limit:
+            return
+        now = time.monotonic()
+        # Drop requests older than 60s
+        while self._req_times and now - self._req_times[0] > 60.0:
+            self._req_times.popleft()
+        # If at capacity, sleep until we can proceed
+        while len(self._req_times) >= self.rpm_limit:
+            head = self._req_times[0]
+            sleep_s = max(0.0, 60.0 - (now - head))
+            if sleep_s > 0:
+                time.sleep(min(sleep_s, 1.0))  # sleep in small chunks
+            now = time.monotonic()
+            while self._req_times and now - self._req_times[0] > 60.0:
+                self._req_times.popleft()
+
+    def _mark_request(self) -> None:
+        if self.rpm_limit:
+            self._req_times.append(time.monotonic())
+
     def get_json(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """GET request with basic retry/backoff for 429/5xx."""
         url = self._url(path)
         last_exc: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
             try:
+                self._throttle()
                 resp = self._client.get(url, params=params or {})
+                self._mark_request()
                 if resp.status_code == 200:
                     try:
                         return resp.json()
@@ -82,7 +112,15 @@ class CGClient:
                         raise RuntimeError(f"Invalid JSON from {url}") from e
                 if resp.status_code in (429,) or 500 <= resp.status_code < 600:
                     # backoff
-                    delay = self.backoff_base * (2**attempt)
+                    # Honor Retry-After if provided
+                    retry_after = resp.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = float(retry_after)
+                        except ValueError:
+                            delay = self.backoff_base * (2**attempt)
+                    else:
+                        delay = self.backoff_base * (2**attempt)
                     time.sleep(delay)
                     continue
                 # Other error: raise now
