@@ -36,23 +36,57 @@ DEFAULT_BASE_URL = "https://open-api-v4.coinglass.com/api"
 
 @dataclass
 class IngestConfig:
-    base_url: str
-    symbol: str
-    start: str  # ISO8601 or epoch
-    end: str
-    out_dir: str
+    raw: Dict[str, Any]
+
+    @property
+    def base_url(self) -> str:
+        return self.raw.get("base_url", DEFAULT_BASE_URL)
+
+    @property
+    def symbol(self) -> str:
+        return self.raw["symbol"]
+
+    @property
+    def timeframe(self) -> str:
+        return str(self.raw.get("timeframe", "15m")).lower()
+
+    @property
+    def horizon_days(self) -> Optional[int]:
+        return int(self.raw.get("horizon_days", 0)) or None
+
+    @property
+    def start(self) -> Optional[str]:
+        return self.raw.get("start")
+
+    @property
+    def end(self) -> Optional[str]:
+        return self.raw.get("end")
+
+    @property
+    def sinks(self) -> Dict[str, Any]:
+        return self.raw.get("sinks", {})
+
+    @property
+    def out_dir(self) -> str:
+        # Prefer sinks.parquet_root, else legacy out_dir
+        sinks = self.sinks
+        if "parquet_root" in sinks:
+            return str(sinks["parquet_root"]).rstrip("/")
+        return self.raw.get("out_dir", f"data/parquet/15m/{self.symbol}").rstrip("/")
+
+    @property
+    def scope(self) -> Dict[str, Any]:
+        return self.raw.get("scope", {})
+
+    @property
+    def endpoints(self) -> Dict[str, str]:
+        return self.raw.get("endpoints", {})
 
 
 def _load_config(path: str) -> IngestConfig:
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
-    return IngestConfig(
-        base_url=cfg.get("base_url", DEFAULT_BASE_URL),
-        symbol=cfg["symbol"],
-        start=str(cfg["start"]),
-        end=str(cfg["end"]),
-        out_dir=cfg.get("out_dir", f"data/parquet/15m/{cfg['symbol']}")
-    )
+    return IngestConfig(raw=cfg)
 
 
 def _ts_to_epoch_ms(ts: str) -> int:
@@ -71,19 +105,19 @@ def _safe_parse(model, rows: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame.from_records(recs)
 
 
-def _fetch_price_ohlc(client: CGClient, symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def _fetch_price_ohlc(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
     # Endpoint naming may differ; these params are typical
     rows = client.get_paginated(
-        path="futures/price/history",
+        path=endpoint_path,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
     )
     df = _safe_parse(PriceBar, rows)
     return resample_15m_ohlcv(df)
 
 
-def _fetch_oi(client: CGClient, symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def _fetch_oi(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
     rows = client.get_paginated(
-        path="futures/open-interest/aggregated-history",
+        path=endpoint_path,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
     )
     df = _safe_parse(OIBar, rows)
@@ -96,20 +130,50 @@ def _fetch_oi(client: CGClient, symbol: str, start_ms: int, end_ms: int) -> pd.D
     return out
 
 
-def _fetch_funding(client: CGClient, symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def _fetch_funding(
+    client: CGClient,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    endpoint_exchange_list: Optional[str],
+    endpoint_oi_weight: Optional[str],
+    endpoint_vol_weight: Optional[str],
+    exchange_preference: Optional[str],
+    fallback_agg: bool,
+) -> pd.DataFrame:
     # Funding per exchange or weighted; reindex→15m ffill≤3
     params = {"symbol": symbol, "startTime": start_ms, "endTime": end_ms}
-    rows = client.get_paginated(path="futures/funding-rate/oi-weight-history", params=params)
-    df = _safe_parse(FundingBar, rows)
-    if df.empty:
-        rows = client.get_paginated(path="futures/funding-rate/vol-weight-history", params=params)
-        df = _safe_parse(FundingBar, rows)
-    return reindex_15m_ffill_limit(df, "funding_now", limit=3)
+    # Try per-exchange first if preference provided
+    if endpoint_exchange_list and exchange_preference:
+        p = dict(params)
+        # Best-effort exchange param naming
+        p.update({"exchange": exchange_preference, "exchangeName": exchange_preference})
+        try:
+            rows = client.get_paginated(path=endpoint_exchange_list, params=p)
+            df = _safe_parse(FundingBar, rows)
+            if not df.empty:
+                return reindex_15m_ffill_limit(df, "funding_now", limit=3)
+        except Exception:
+            # fall through to weighted if allowed
+            pass
+    if fallback_agg:
+        if endpoint_oi_weight:
+            rows = client.get_paginated(path=endpoint_oi_weight, params=params)
+            df = _safe_parse(FundingBar, rows)
+            if not df.empty:
+                return reindex_15m_ffill_limit(df, "funding_now", limit=3)
+        if endpoint_vol_weight:
+            rows = client.get_paginated(path=endpoint_vol_weight, params=params)
+            df = _safe_parse(FundingBar, rows)
+            if not df.empty:
+                return reindex_15m_ffill_limit(df, "funding_now", limit=3)
+    # default empty
+    return pd.DataFrame(columns=["ts", "funding_now", "funding_now_imputed"])  # typed
 
 
-def _fetch_taker_perp(client: CGClient, symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def _fetch_taker_perp(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
     rows = client.get_paginated(
-        path="futures/taker-buy-sell-volume/history",
+        path=endpoint_path,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
     )
     df = _safe_parse(TakerVolumeBar, rows)
@@ -118,10 +182,17 @@ def _fetch_taker_perp(client: CGClient, symbol: str, start_ms: int, end_ms: int)
     return resample_15m_sum(df, ["taker_buy_usd", "taker_sell_usd"])  # perp
 
 
-def _fetch_taker_spot_agg(client: CGClient, symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def _fetch_taker_spot_agg(
+    client: CGClient,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    endpoint_spot_agg: str,
+    endpoint_fut_agg: str,
+) -> pd.DataFrame:
     # Aggregate spot and perp taker volumes if endpoint available
     rows_spot = client.get_paginated(
-        path="spot/aggregated-taker-buy-sell-volume/history",
+        path=endpoint_spot_agg,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
     )
     spot_df = _safe_parse(TakerVolumeBar, rows_spot)
@@ -132,7 +203,7 @@ def _fetch_taker_spot_agg(client: CGClient, symbol: str, start_ms: int, end_ms: 
             "taker_sell_usd": "spot_taker_sell_usd",
         })
     rows_perp_agg = client.get_paginated(
-        path="futures/aggregated-taker-buy-sell-volume/history",
+        path=endpoint_fut_agg,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
     )
     perp_df = _safe_parse(TakerVolumeBar, rows_perp_agg)
@@ -147,9 +218,9 @@ def _fetch_taker_spot_agg(client: CGClient, symbol: str, start_ms: int, end_ms: 
     return out
 
 
-def _fetch_liq(client: CGClient, symbol: str, start_ms: int, end_ms: int) -> pd.DataFrame:
+def _fetch_liq(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
     rows = client.get_paginated(
-        path="futures/liquidation/heatmap/coin/model1",
+        path=endpoint_path,
         params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
     )
     df = _safe_parse(LiquidationEvent, rows)
@@ -192,29 +263,81 @@ def ingest_coinglass(
 ) -> None:
     """Ingest CoinGlass endpoints and build 15m Parquet with features."""
     cfg = _load_config(conf)
-    Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
-    start_ms = _ts_to_epoch_ms(cfg.start)
-    end_ms = _ts_to_epoch_ms(cfg.end)
+    # Time window: prefer explicit start/end; else horizon_days → [now - horizon_days, now]
+    if cfg.start and cfg.end:
+        start_ms = _ts_to_epoch_ms(str(cfg.start))
+        end_ms = _ts_to_epoch_ms(str(cfg.end))
+    else:
+        now = pd.Timestamp.utcnow().tz_localize("UTC")
+        hz = cfg.horizon_days or 180
+        start_ms = int((now - pd.Timedelta(days=hz)).value // 1_000_000)
+        end_ms = int(now.value // 1_000_000)
+
+    if cfg.timeframe != "15m":
+        raise typer.BadParameter(f"Unsupported timeframe {cfg.timeframe}; only 15m is implemented.")
+
+    out_dir = cfg.out_dir
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     client = CGClient(base_url=cfg.base_url)
 
+    # Endpoint resolution
+    logical_to_v4 = {
+        "price-ohlc-history": "futures/price/history",
+        "oi-ohlc-aggregated-history": "futures/open-interest/aggregated-history",
+        "fr-exchange-list": "futures/funding-rate/exchange-list",
+        "oi-weight-ohlc-history": "futures/funding-rate/oi-weight-history",
+        "vol-weight-ohlc-history": "futures/funding-rate/vol-weight-history",
+        "taker-buysell-volume": "futures/taker-buy-sell-volume/history",
+        "aggregated-taker-buysell-volume-history": "futures/aggregated-taker-buy-sell-volume/history",
+        "spot-aggregated-taker-buysell-history": "spot/aggregated-taker-buy-sell-volume/history",
+        "liquidation-aggregate-heatmap": "futures/liquidation/heatmap/coin/model1",
+    }
+
+    ep = cfg.endpoints
+    ep_price = logical_to_v4.get(ep.get("futures_ohlcv", "price-ohlc-history"))
+    ep_oi = logical_to_v4.get(ep.get("oi_ohlc_agg", "oi-ohlc-aggregated-history"))
+    ep_funding_list = logical_to_v4.get(ep.get("funding_now_list", "fr-exchange-list"))
+    ep_funding_oi = logical_to_v4.get(ep.get("funding_oi_weighted", "oi-weight-ohlc-history"))
+    ep_funding_vol = logical_to_v4.get(ep.get("funding_vol_weighted", "vol-weight-ohlc-history"))
+    ep_taker_perp = logical_to_v4.get(ep.get("fut_taker", "taker-buysell-volume"))
+    ep_taker_fut_agg = logical_to_v4.get(ep.get("fut_taker_agg", "aggregated-taker-buysell-volume-history"))
+    ep_taker_spot_agg = logical_to_v4.get(ep.get("spot_taker_agg", "spot-aggregated-taker-buysell-history"))
+    ep_liq = logical_to_v4.get(ep.get("liq_heatmap_agg", "liquidation-aggregate-heatmap"))
+
+    scope = cfg.scope
+    exchange_pref = scope.get("exchange_preference")
+    fallback_agg = bool(scope.get("fallback_agg", True))
+
     typer.echo("Fetching price OHLC...")
-    price15 = _fetch_price_ohlc(client, cfg.symbol, start_ms, end_ms)
+    price15 = _fetch_price_ohlc(client, cfg.symbol, start_ms, end_ms, ep_price)
 
     typer.echo("Fetching OI...")
-    oi15 = _fetch_oi(client, cfg.symbol, start_ms, end_ms)
+    oi15 = _fetch_oi(client, cfg.symbol, start_ms, end_ms, ep_oi)
 
     typer.echo("Fetching funding...")
-    funding15 = _fetch_funding(client, cfg.symbol, start_ms, end_ms)
+    funding15 = _fetch_funding(
+        client,
+        cfg.symbol,
+        start_ms,
+        end_ms,
+        ep_funding_list,
+        ep_funding_oi,
+        ep_funding_vol,
+        exchange_pref,
+        fallback_agg,
+    )
 
     typer.echo("Fetching perp taker volumes...")
-    perp_taker15 = _fetch_taker_perp(client, cfg.symbol, start_ms, end_ms)
+    perp_taker15 = _fetch_taker_perp(client, cfg.symbol, start_ms, end_ms, ep_taker_perp)
 
     typer.echo("Fetching spot/perp aggregated taker volumes...")
-    agg_taker15 = _fetch_taker_spot_agg(client, cfg.symbol, start_ms, end_ms)
+    agg_taker15 = _fetch_taker_spot_agg(
+        client, cfg.symbol, start_ms, end_ms, ep_taker_spot_agg, ep_taker_fut_agg
+    )
 
     typer.echo("Fetching liquidation heatmap...")
-    liq15 = _fetch_liq(client, cfg.symbol, start_ms, end_ms)
+    liq15 = _fetch_liq(client, cfg.symbol, start_ms, end_ms, ep_liq)
 
     # Compose base join on ts
     df = price15
@@ -230,8 +353,8 @@ def ingest_coinglass(
 
     # Partitioned write
     df = add_partitions(df)
-    write_parquet_partitioned(df, cfg.out_dir)
-    typer.echo(f"Wrote Parquet dataset to {cfg.out_dir}")
+    write_parquet_partitioned(df, out_dir)
+    typer.echo(f"Wrote Parquet dataset to {out_dir}")
 
 
 if __name__ == "__main__":

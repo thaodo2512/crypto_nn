@@ -1,7 +1,122 @@
-# Example config for CoinGlass v4 ingest
+version: p1_inputs_cg_v1
+vendor: coinglass
 base_url: https://open-api-v4.coinglass.com/api
 symbol: BTCUSDT
-start: 2024-06-01T00:00:00Z
-end: 2024-06-07T23:59:59Z
-out_dir: data/parquet/15m/BTCUSDT
+timeframe: 15m
+horizon_days: 180
+timezone: UTC
+partitioning: y/m/d
 
+scope:
+  exchange_preference: BINANCE
+  fallback_agg: true
+
+endpoints:
+  futures_ohlcv: price-ohlc-history
+  oi_ohlc_agg: oi-ohlc-aggregated-history
+  funding_now_list: fr-exchange-list
+  funding_oi_weighted: oi-weight-ohlc-history
+  funding_vol_weighted: vol-weight-ohlc-history
+  fut_taker: taker-buysell-volume
+  fut_taker_agg: aggregated-taker-buysell-volume-history
+  spot_taker_agg: spot-aggregated-taker-buysell-history
+  liq_heatmap_agg: liquidation-aggregate-heatmap
+
+features_core:
+  open:
+    from: futures_ohlcv
+    field: open
+  high:
+    from: futures_ohlcv
+    field: high
+  low:
+    from: futures_ohlcv
+    field: low
+  close:
+    from: futures_ohlcv
+    field: close
+  volume:
+    from: futures_ohlcv
+    field: volume_usd
+  funding_now:
+    from: [funding_now_list, funding_oi_weighted]
+    reindex: 15m
+    ffill_bars_max: 3
+  funding_pctile_30d:
+    from: funding_oi_weighted
+    transform: pctile_rolling
+    window_days: 30
+  oi_now:
+    from: oi_ohlc_agg
+    field: close
+    reindex: 15m
+  oi_pctile_30d:
+    from: oi_ohlc_agg
+    field: close
+    transform: pctile_rolling
+    window_days: 30
+  cvd_perp_15m:
+    from: [fut_taker, fut_taker_agg]
+    compose:
+      step1: signed_flow_15m = taker_buy_volume_usd_15m - taker_sell_volume_usd_15m
+      step2: cvd_perp_15m = cumsum(signed_flow_15m)
+  perp_share_60m:
+    from: [fut_taker_agg, spot_taker_agg]
+    compose:
+      step1: perp_taker_usd_60m = roll_sum_60m(fut_taker_agg.buy_usd + fut_taker_agg.sell_usd)
+      step2: spot_taker_usd_60m = roll_sum_60m(spot_taker_agg.buy_usd + spot_taker_agg.sell_usd)
+      step3: perp_share_60m = perp_taker_usd_60m / max(perp_taker_usd_60m + spot_taker_usd_60m, 1e-9)
+  liq_notional_60m:
+    from: liq_heatmap_agg
+    compose:
+      step1: liq_notional = sum_over_price_buckets(notional)
+      step2: liq_notional_60m = roll_sum_60m(liq_notional)
+  rv_15m:
+    from: futures_ohlcv
+    compose:
+      step1: ret_15m = log(close/close.shift(1))
+      step2: rv_15m = ret_15m**2
+
+features_aux:
+  - name: spot_taker_buy_vol_15m
+    from: spot_taker_agg
+    field: aggregated_buy_volume_usd
+  - name: spot_taker_sell_vol_15m
+    from: spot_taker_agg
+    field: aggregated_sell_volume_usd
+  - name: spot_taker_ratio_15m
+    compose:
+      step1: denom = max(spot_taker_buy_vol_15m + spot_taker_sell_vol_15m, 1e-9)
+      step2: spot_taker_ratio_15m = spot_taker_buy_vol_15m / denom
+
+features_deferred:
+  - basis_now
+  - basis_TWAP_60m
+  - basis_TWAP_120m
+  - funding_pred_twap_60m
+
+transforms_common:
+  winsorize:
+    p_low: 0.01
+    p_high: 0.99
+  zscore_window_days: 30
+  resample:
+    rule: 15m
+    closed: right
+    label: right
+  impute:
+    ffill_bars_max: 3
+  flags:
+    emit_imputed_flags: true
+
+qa_targets:
+  expected_bars_180d: 17280
+  missing_ratio_max: 0.005
+  impute_ratio_max: 0.05
+  no_nan_after_transform: true
+  unique_key: [symbol, ts]
+
+sinks:
+  parquet_root: data/parquet/15m/BTCUSDT/
+  duckdb_db: meta/duckdb/p1.duckdb
+  view_name: bars_15m
