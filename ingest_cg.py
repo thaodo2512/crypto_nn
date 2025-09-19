@@ -3,7 +3,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 import typer
@@ -87,6 +87,59 @@ def _load_config(path: str) -> IngestConfig:
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
     return IngestConfig(raw=cfg)
+
+
+def _days_range(start_ms: int, end_ms: int) -> List[pd.Timestamp]:
+    start_day = pd.to_datetime(start_ms, unit="ms", utc=True).normalize()
+    end_day = pd.to_datetime(end_ms, unit="ms", utc=True).normalize()
+    return list(pd.date_range(start_day, end_day, freq="D"))
+
+
+def _list_success_days(out_root: str) -> Set[pd.Timestamp]:
+    out: Set[pd.Timestamp] = set()
+    root = Path(out_root)
+    if not root.exists():
+        return out
+    for y_dir in root.glob("y=*"):
+        try:
+            y = int(str(y_dir.name).split("=")[1])
+        except Exception:
+            continue
+        for m_dir in y_dir.glob("m=*"):
+            try:
+                m = int(str(m_dir.name).split("=")[1])
+            except Exception:
+                continue
+            for d_dir in m_dir.glob("d=*"):
+                try:
+                    d = int(str(d_dir.name).split("=")[1])
+                except Exception:
+                    continue
+                if (d_dir / "_SUCCESS").exists() and (d_dir / "MANIFEST.tsv").exists():
+                    out.add(pd.Timestamp(year=y, month=m, day=d, tz="UTC"))
+    return out
+
+
+def _compress_days_to_segments(days: List[pd.Timestamp]) -> List[Tuple[int, int]]:
+    if not days:
+        return []
+    days_sorted = sorted(days)
+    segs: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    start = days_sorted[0]
+    prev = start
+    for cur in days_sorted[1:]:
+        if (cur - prev) > pd.Timedelta(days=1):
+            segs.append((start, prev))
+            start = cur
+        prev = cur
+    segs.append((start, prev))
+    # convert to ms [start00:00, (end+1)00:00)
+    out: List[Tuple[int, int]] = []
+    for s, e in segs:
+        s_ms = int(s.value // 1_000_000)
+        e_ms = int((e + pd.Timedelta(days=1)).value // 1_000_000)
+        out.append((s_ms, e_ms))
+    return out
 
 
 def _ts_to_epoch_ms(ts: str) -> int:
@@ -402,6 +455,9 @@ def _compose_features(df: pd.DataFrame) -> pd.DataFrame:
 def ingest_coinglass(
     conf: str = typer.Option(..., "--conf", help="YAML config path (p1_inputs_cg.yaml)"),
     debug: bool = typer.Option(False, "--debug", help="Enable verbose debug logging"),
+    skip_present: bool = typer.Option(True, "--skip-present/--no-skip-present", help="Skip days that already have _SUCCESS marker"),
+    refresh_tail: int = typer.Option(2, "--refresh-tail", help="Always refresh last N days to capture late data"),
+    force: bool = typer.Option(False, "--force", help="Ignore cache and re-fetch entire horizon"),
 ) -> None:
     """Ingest CoinGlass endpoints and build 15m Parquet with features."""
     cfg = _load_config(conf)
@@ -451,23 +507,52 @@ def ingest_coinglass(
     exchange_pref = scope.get("exchange_preference")
     fallback_agg = bool(scope.get("fallback_agg", True))
 
+    # Determine target days to fetch
+    all_days = _days_range(start_ms, end_ms)
+    target_days = set(all_days)
+    if skip_present and not force:
+        done = _list_success_days(out_dir)
+        target_days = set(all_days) - done
+    if refresh_tail and not force:
+        tail_start = (pd.to_datetime(end_ms, unit="ms", utc=True).normalize() - pd.Timedelta(days=refresh_tail-1))
+        tail_days = set(pd.date_range(tail_start, pd.to_datetime(end_ms, unit="ms", utc=True).normalize(), freq="D"))
+        target_days |= tail_days
+    target_days = {d for d in target_days if d in set(all_days)}
+    if not target_days and skip_present and not force:
+        typer.echo("Nothing to ingest: all target days already have _SUCCESS (consider --no-skip-present or --refresh-tail)")
+        raise typer.Exit(code=0)
+
+    segments = _compress_days_to_segments(sorted(target_days))
+    if debug:
+        typer.echo(f"Segments to fetch (UTC): {[(pd.to_datetime(s, unit='ms', utc=True).isoformat(), pd.to_datetime(e, unit='ms', utc=True).isoformat()) for s,e in segments]}")
+
     typer.echo("Fetching price OHLC...")
     if debug:
         typer.echo(f"Endpoint: {client.base_url}/{ep_price}")
-    price15 = _fetch_price_ohlc(client, cfg.symbol, start_ms, end_ms, ep_price, cfg.timeframe, exchange_pref)
+    price_frames: List[pd.DataFrame] = []
+    for s, e in segments:
+        part = _fetch_price_ohlc(client, cfg.symbol, s, e, ep_price, cfg.timeframe, exchange_pref)
+        if not part.empty:
+            price_frames.append(part)
+    price15 = pd.concat(price_frames, ignore_index=True) if price_frames else pd.DataFrame(columns=["ts"])  # type: ignore
     if price15.empty:
         typer.echo("No OHLCV returned. Check API key, symbol, exchange, and interval=15m support.")
         raise typer.Exit(code=1)
 
     typer.echo("Fetching OI...")
-    oi15 = _fetch_oi(client, cfg.symbol, start_ms, end_ms, ep_oi, cfg.timeframe)
+    oi_frames: List[pd.DataFrame] = []
+    for s, e in segments:
+        part = _fetch_oi(client, cfg.symbol, s, e, ep_oi, cfg.timeframe)
+        if not part.empty:
+            oi_frames.append(part)
+    oi15 = pd.concat(oi_frames, ignore_index=True) if oi_frames else pd.DataFrame(columns=["ts"])  # type: ignore
 
     typer.echo("Fetching funding...")
     funding15 = _fetch_funding(
         client,
         cfg.symbol,
-        start_ms,
-        end_ms,
+        segments[0][0],  # full window for funding; typically coarse frequency
+        segments[-1][1],
         ep_funding_list,
         ep_funding_oi,
         ep_funding_vol,
@@ -476,17 +561,36 @@ def ingest_coinglass(
     )
 
     typer.echo("Fetching perp taker volumes...")
-    perp_taker15 = _fetch_taker_perp(
-        client, cfg.symbol, start_ms, end_ms, ep_taker_perp, cfg.timeframe, exchange_pref
-    )
+    perp_frames: List[pd.DataFrame] = []
+    for s, e in segments:
+        part = _fetch_taker_perp(client, cfg.symbol, s, e, ep_taker_perp, cfg.timeframe, exchange_pref)
+        if not part.empty:
+            perp_frames.append(part)
+    perp_taker15 = pd.concat(perp_frames, ignore_index=True) if perp_frames else pd.DataFrame(columns=["ts"])  # type: ignore
 
     typer.echo("Fetching spot/perp aggregated taker volumes...")
-    agg_taker15 = _fetch_taker_spot_agg(
-        client, cfg.symbol, start_ms, end_ms, ep_taker_spot_agg, ep_taker_fut_agg, cfg.timeframe
-    )
+    agg_spot_frames: List[pd.DataFrame] = []
+    agg_fut_frames: List[pd.DataFrame] = []
+    for s, e in segments:
+        rows_spot = _timeslice_fetch(client, ep_taker_spot_agg, cfg.symbol, s, e, cfg.timeframe)
+        rows_fut = _timeslice_fetch(client, ep_taker_fut_agg, cfg.symbol, s, e, cfg.timeframe)
+        spot_df = _safe_parse(TakerVolumeBar, rows_spot)
+        fut_df = _safe_parse(TakerVolumeBar, rows_fut)
+        if not spot_df.empty:
+            agg_spot_frames.append(resample_15m_sum(spot_df, ["taker_buy_usd", "taker_sell_usd"]))
+        if not fut_df.empty:
+            agg_fut_frames.append(resample_15m_sum(fut_df, ["taker_buy_usd", "taker_sell_usd"]))
+    spot_agg = pd.concat(agg_spot_frames, ignore_index=True) if agg_spot_frames else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
+    fut_agg = pd.concat(agg_fut_frames, ignore_index=True) if agg_fut_frames else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
+    if not spot_agg.empty:
+        spot_agg = spot_agg.rename(columns={"taker_buy_usd": "spot_taker_buy_usd", "taker_sell_usd": "spot_taker_sell_usd"})
+    if not fut_agg.empty:
+        fut_agg = fut_agg.rename(columns={"taker_buy_usd": "perp_taker_buy_usd", "taker_sell_usd": "perp_taker_sell_usd"})
+    agg_taker15 = pd.merge(spot_agg, fut_agg, on="ts", how="outer")
 
     typer.echo("Fetching liquidation heatmap...")
-    liq15 = _fetch_liq(client, cfg.symbol, start_ms, end_ms, ep_liq, exchange_pref)
+    # Liquidations: fetch across full window spanning segments
+    liq15 = _fetch_liq(client, cfg.symbol, segments[0][0], segments[-1][1], ep_liq, exchange_pref)
 
     # Compose base join on ts
     df = price15
