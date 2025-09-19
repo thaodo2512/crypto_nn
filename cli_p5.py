@@ -18,7 +18,7 @@ import typer
 from folds import make_purged_folds
 
 
-app = typer.Typer(help="P5 – Small NN training (GRU) for 5m BTCUSDT")
+app = typer.Typer(help="P5/P6 – Training + Calibration/Ensemble for 5m BTCUSDT")
 
 
 def _read_parquet(glob: str) -> pd.DataFrame:
@@ -269,6 +269,259 @@ def train(
     typer.echo("P5 training completed; metrics saved.")
 
 
+# ---------- Phase 6: Calibration, Ensembling, Threshold Tuning ----------
+
+
+def _softmax(z: np.ndarray, T: float = 1.0) -> np.ndarray:
+    z = z / max(T, 1e-6)
+    z = z - z.max(axis=1, keepdims=True)
+    e = np.exp(z)
+    p = e / e.sum(axis=1, keepdims=True)
+    return p
+
+
+def _ece_top(prob: np.ndarray, y_true: np.ndarray, n_bins: int = 15) -> float:
+    # Multi-class ECE on top-class
+    pred = prob.argmax(axis=1)
+    conf = prob.max(axis=1)
+    correct = (pred == y_true).astype(float)
+    bins = np.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    N = len(y_true)
+    for i in range(n_bins):
+        lo, hi = bins[i], bins[i + 1]
+        mask = (conf > lo) & (conf <= hi)
+        if mask.any():
+            acc = correct[mask].mean()
+            avg_conf = conf[mask].mean()
+            ece += (mask.sum() / N) * abs(acc - avg_conf)
+    return float(ece)
+
+
+def _nll(logits: np.ndarray, y: np.ndarray, T: float) -> float:
+    p = _softmax(logits, T=T)
+    eps = 1e-9
+    ll = -np.log(p[np.arange(len(y)), y] + eps)
+    return float(ll.mean())
+
+
+def _load_probs(glob: str) -> pd.DataFrame:
+    con = duckdb.connect()
+    try:
+        df = con.execute(f"SELECT * FROM read_parquet('{glob}')").df()
+    finally:
+        con.close()
+    if "ts" in df.columns:
+        df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    return df
+
+
+@app.command("calibrate")
+def calibrate(
+    probs: str = typer.Option(..., "--probs", help="Per-fold logits/probs parquet glob with columns [fold_id, split, ts, y, logits_* or p_*]"),
+    method: str = typer.Option("temperature", "--method"),
+    out: str = typer.Option("models/calib.json", "--out"),
+) -> None:
+    df = _load_probs(probs)
+    # Expect columns: fold_id, split in {val,oos}, y (int), and either logits_0..2 or p_0..2
+    folds = sorted(df["fold_id"].unique()) if "fold_id" in df else [0]
+    calib: Dict[str, Dict[str, float]] = {}
+    for fid in folds:
+        sub = df[df.get("fold_id", 0) == fid]
+        val = sub[sub.get("split", "val") == "val"]
+        if any(c.startswith("logits_") for c in val.columns):
+            logits = val[[c for c in val.columns if c.startswith("logits_")]].to_numpy()
+        elif any(c.startswith("p_") for c in val.columns):
+            # Convert probs to logits via inverse softmax (log)
+            p = val[[c for c in val.columns if c.startswith("p_")]].to_numpy()
+            logits = np.log(np.maximum(p, 1e-8))
+        else:
+            raise typer.BadParameter("Missing logits_ or p_ columns")
+        yv = val["y"].to_numpy().astype(int)
+        bestT = 1.0
+        bestNLL = 1e9
+        for T in np.linspace(0.5, 5.0, 91):
+            nll = _nll(logits, yv, T)
+            if nll < bestNLL:
+                bestNLL = nll
+                bestT = float(T)
+        pv = _softmax(logits, T=bestT)
+        ece = _ece_top(pv, yv)
+        calib[str(fid)] = {"temperature": bestT, "ece_val": ece, "nll_val": bestNLL}
+    Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(calib, f, indent=2)
+    typer.echo(f"Calibration saved to {out}")
+
+
+def _ev_trade(prob: np.ndarray, y: np.ndarray, tau: float, cost_bps: float) -> float:
+    # Simple EV per trade: +1 correct direction, -1 wrong direction, 0 on WAIT or no trade; subtract costs.
+    pred = prob.argmax(axis=1)
+    conf = prob.max(axis=1)
+    take = conf >= tau
+    pnl = np.zeros_like(conf)
+    # LONG=1, SHORT=2, WAIT=0
+    pnl[(pred == 1) & (y == 1) & take] = 1.0
+    pnl[(pred == 1) & (y != 1) & take] = -1.0
+    pnl[(pred == 2) & (y == 2) & take] = 1.0
+    pnl[(pred == 2) & (y != 2) & take] = -1.0
+    trades = take.sum()
+    if trades == 0:
+        return 0.0
+    # cost per trade in fraction
+    cost = cost_bps / 1e4
+    ev = pnl[take].mean() - cost
+    return float(ev)
+
+
+@app.command("ensemble")
+def ensemble(
+    calib: str = typer.Option(..., "--calib", help="Calibration JSON from calibrate"),
+    probs: str = typer.Option(..., "--probs", help="Per-fold OOS probs/logits parquet glob with split='oos'"),
+    weight_by: str = typer.Option("EV", "--weight-by"),
+    out: str = typer.Option("models/ensemble_5m.json", "--out"),
+    cost_bps: float = typer.Option(5.0, "--cost_bps"),
+) -> None:
+    with open(calib, "r") as f:
+        cal = json.load(f)
+    df = _load_probs(probs)
+    oos = df[df.get("split", "oos") == "oos"].copy()
+    folds = sorted(oos["fold_id"].unique()) if "fold_id" in oos else [0]
+    # Build calibrated probabilities per fold
+    prob_folds: Dict[int, np.ndarray] = {}
+    y = oos["y"].to_numpy().astype(int)
+    for fid in folds:
+        sub = oos[oos.get("fold_id", 0) == fid]
+        if any(c.startswith("logits_") for c in sub.columns):
+            logits = sub[[c for c in sub.columns if c.startswith("logits_")]].to_numpy()
+            T = float(cal.get(str(fid), {}).get("temperature", 1.0))
+            p = _softmax(logits, T=T)
+        else:
+            p = sub[[c for c in sub.columns if c.startswith("p_")]].to_numpy()
+        prob_folds[fid] = p
+    # Compute EV per fold at tau=0.5 (baseline)
+    evs = []
+    for fid in folds:
+        ev = _ev_trade(prob_folds[fid], y, tau=0.5, cost_bps=cost_bps)
+        evs.append(max(ev, 0.0))
+    evs = np.array(evs)
+    if evs.sum() == 0:
+        w = np.ones_like(evs) / len(evs)
+    else:
+        w = evs / evs.sum()
+    weights = {str(fid): float(w[i]) for i, fid in enumerate(folds)}
+    Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        json.dump({"weights": weights, "calibration": cal}, f, indent=2)
+    typer.echo(f"Ensemble weights saved to {out}")
+
+
+@app.command("tune-threshold")
+def tune_threshold(
+    ensemble_json: str = typer.Option(..., "--ensemble", help="Ensemble JSON with weights + calibration"),
+    probs: str = typer.Option(..., "--probs", help="Per-fold OOS probs/logits parquet glob"),
+    grid: str = typer.Option("0.50:0.80:0.025", "--grid"),
+    cost_spec: str = typer.Option("bps:5", "--cost"),
+    out: str = typer.Option("reports/p6_oos_summary.json", "--out"),
+) -> None:
+    import matplotlib.pyplot as plt
+
+    with open(ensemble_json, "r") as f:
+        ens = json.load(f)
+    weights = {int(k): float(v) for k, v in ens.get("weights", {}).items()}
+    cal = ens.get("calibration", {})
+    df = _load_probs(probs)
+    oos = df[df.get("split", "oos") == "oos"].copy()
+    folds = sorted(oos["fold_id"].unique()) if "fold_id" in oos else [0]
+    y = oos["y"].to_numpy().astype(int)
+    # Calibrated fold probs
+    P_list = []
+    for fid in folds:
+        sub = oos[oos.get("fold_id", 0) == fid]
+        if any(c.startswith("logits_") for c in sub.columns):
+            logits = sub[[c for c in sub.columns if c.startswith("logits_")]].to_numpy()
+            T = float(cal.get(str(fid), {}).get("temperature", 1.0))
+            p = _softmax(logits, T=T)
+        else:
+            p = sub[[c for c in sub.columns if c.startswith("p_")]].to_numpy()
+        w = float(weights.get(fid, 1.0 / max(len(folds), 1)))
+        P_list.append(w * p)
+    P_ens = np.sum(P_list, axis=0) if P_list else np.zeros((len(y), 3))
+
+    # Grid search tau
+    start, end, step = [float(x) for x in grid.split(":")]
+    taus = np.arange(start, end + 1e-9, step)
+    cost_bps = float(cost_spec.split(":")[1]) if cost_spec.startswith("bps:") else 5.0
+    evs = []
+    precs = []
+    recs = []
+    for tau in taus:
+        ev = _ev_trade(P_ens, y, tau=tau, cost_bps=cost_bps)
+        evs.append(ev)
+        # precision/recall on non-WAIT
+        pred = P_ens.argmax(axis=1)
+        conf = P_ens.max(axis=1)
+        take = conf >= tau
+        tp = ((pred == y) & (take) & (y != 0)).sum()
+        fp = ((pred != y) & (take) & (pred != 0)).sum()
+        fn = ((pred != 0) & (~take) & (y != 0)).sum()
+        prec = tp / (tp + fp) if (tp + fp) else 0.0
+        rec = tp / (tp + fn) if (tp + fn) else 0.0
+        precs.append(prec)
+        recs.append(rec)
+
+    # Choose best tau
+    best_idx = int(np.argmax(evs))
+    best_tau = float(taus[best_idx])
+    # ECE after ensembling at best tau threshold (calibration overall)
+    ece = _ece_top(P_ens, y)
+
+    # Split OOS into two time segments for CI (simple): halves
+    mid = len(y) // 2
+    segs = [(slice(0, mid), "seg1"), (slice(mid, None), "seg2")]
+    seg_ev = {}
+    for s, name in segs:
+        seg_ev[name] = _ev_trade(P_ens[s], y[s], tau=best_tau, cost_bps=cost_bps)
+    # 95% CI by normal approx across segments (few segments → illustrative)
+    vals = np.array(list(seg_ev.values()))
+    mu = float(vals.mean())
+    sigma = float(vals.std(ddof=1)) if len(vals) > 1 else 0.0
+    ci95 = [mu - 1.96 * sigma, mu + 1.96 * sigma]
+
+    Path("reports").mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(
+            {
+                "best_tau": best_tau,
+                "ev_trade": evs[best_idx],
+                "ev_by_tau": {str(float(t)): float(e) for t, e in zip(taus, evs)},
+                "precision_by_tau": {str(float(t)): float(p) for t, p in zip(taus, precs)},
+                "recall_by_tau": {str(float(t)): float(r) for t, r in zip(taus, recs)},
+                "ece": ece,
+                "seg_ev": seg_ev,
+                "ci95_ev": ci95,
+            },
+            f,
+            indent=2,
+        )
+
+    # Curves plot
+    plt.figure(figsize=(6, 4))
+    ax1 = plt.gca()
+    ax1.plot(taus, evs, label="EV/trade", color="C0")
+    ax1.set_xlabel("tau")
+    ax1.set_ylabel("EV/trade", color="C0")
+    ax2 = ax1.twinx()
+    ax2.plot(taus, precs, label="precision", color="C1", linestyle="--")
+    ax2.plot(taus, recs, label="recall", color="C2", linestyle=":")
+    ax2.set_ylabel("precision/recall")
+    ax1.axvline(best_tau, color="gray", linestyle="-")
+    ax1.legend(loc="upper left")
+    ax2.legend(loc="upper right")
+    plt.tight_layout()
+    plt.savefig("reports/p6_curves.png", dpi=150)
+    typer.echo(f"Threshold tuned: tau={best_tau:.3f}, report saved to {out}")
+
+
 if __name__ == "__main__":
     app()
-
