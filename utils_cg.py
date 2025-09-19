@@ -38,6 +38,11 @@ def to_utc_ts(x: Any) -> pd.Timestamp:
     raise TypeError(f"Unsupported timestamp type: {type(x)}")
 
 
+def to_utc_dt(x: Any) -> datetime:
+    """Convert various time formats to tz-aware Python datetime (UTC)."""
+    return to_utc_ts(x).to_pydatetime()
+
+
 class CGClient:
     """CoinGlass HTTP client with retry/backoff and auth header.
 
@@ -179,7 +184,7 @@ class CGClient:
 
 
 class PriceBar(BaseModel):
-    ts: pd.Timestamp
+    ts: datetime
     open: float
     high: float
     low: float
@@ -195,11 +200,11 @@ class PriceBar(BaseModel):
         l = row.get("l") or row.get("low")
         c = row.get("c") or row.get("close")
         v = row.get("v") or row.get("volume") or row.get("volume_usd") or 0.0
-        return cls(ts=to_utc_ts(ts), open=float(o), high=float(h), low=float(l), close=float(c), volume_usd=float(v))
+        return cls(ts=to_utc_dt(ts), open=float(o), high=float(h), low=float(l), close=float(c), volume_usd=float(v))
 
 
 class OIBar(BaseModel):
-    ts: pd.Timestamp
+    ts: datetime
     oi_now: float
 
     @classmethod
@@ -207,11 +212,11 @@ class OIBar(BaseModel):
         ts = row.get("t") or row.get("ts") or row.get("timestamp")
         # Use close as per requirement
         val = row.get("c") or row.get("close") or row.get("oi")
-        return cls(ts=to_utc_ts(ts), oi_now=float(val))
+        return cls(ts=to_utc_dt(ts), oi_now=float(val))
 
 
 class FundingBar(BaseModel):
-    ts: pd.Timestamp
+    ts: datetime
     funding_now: float
 
     @classmethod
@@ -219,11 +224,11 @@ class FundingBar(BaseModel):
         ts = row.get("t") or row.get("ts") or row.get("timestamp")
         # Funding can be rate per interval
         val = row.get("f") or row.get("funding") or row.get("fundingRate") or row.get("value")
-        return cls(ts=to_utc_ts(ts), funding_now=float(val))
+        return cls(ts=to_utc_dt(ts), funding_now=float(val))
 
 
 class TakerVolumeBar(BaseModel):
-    ts: pd.Timestamp
+    ts: datetime
     taker_buy_usd: float = 0.0
     taker_sell_usd: float = 0.0
 
@@ -232,18 +237,18 @@ class TakerVolumeBar(BaseModel):
         ts = row.get("t") or row.get("ts") or row.get("timestamp")
         buy = row.get("buy") or row.get("taker_buy_usd") or row.get("buyVolumeUsd") or 0.0
         sell = row.get("sell") or row.get("taker_sell_usd") or row.get("sellVolumeUsd") or 0.0
-        return cls(ts=to_utc_ts(ts), taker_buy_usd=float(buy), taker_sell_usd=float(sell))
+        return cls(ts=to_utc_dt(ts), taker_buy_usd=float(buy), taker_sell_usd=float(sell))
 
 
 class LiquidationEvent(BaseModel):
-    ts: pd.Timestamp
+    ts: datetime
     notional_usd: float
 
     @classmethod
     def from_raw(cls, row: Dict[str, Any]) -> "LiquidationEvent":
         ts = row.get("t") or row.get("ts") or row.get("timestamp")
         notional = row.get("notional") or row.get("value") or row.get("amountUsd")
-        return cls(ts=to_utc_ts(ts), notional_usd=float(notional))
+        return cls(ts=to_utc_dt(ts), notional_usd=float(notional))
 
 
 # --- Transformation helpers ---

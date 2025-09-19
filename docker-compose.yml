@@ -1,5 +1,3 @@
-version: "3.9"
-
 x-app: &app
   build: .
   working_dir: /app
