@@ -218,11 +218,64 @@ def _fetch_taker_spot_agg(
     return out
 
 
-def _fetch_liq(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
-    rows = client.get_paginated(
-        path=endpoint_path,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
-    )
+def _fetch_liq(
+    client: CGClient,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    endpoint_path: str,
+    exchange_preference: Optional[str] = None,
+) -> pd.DataFrame:
+    def _extract_rows(payload: Any) -> List[Dict[str, Any]]:
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            for k in ("data", "list", "rows", "result"):
+                v = payload.get(k)
+                if isinstance(v, list):
+                    return v
+            d = payload.get("data")
+            if isinstance(d, dict):
+                for k in ("list", "rows", "result"):
+                    v = d.get(k)
+                    if isinstance(v, list):
+                        return v
+        return []
+
+    params_base: Dict[str, Any] = {"symbol": symbol}
+    if exchange_preference:
+        params_base.update({"exchange": exchange_preference, "exchangeName": exchange_preference})
+
+    # Try direct time-bounded query first
+    try:
+        payload = client.get_json(endpoint_path, {**params_base, "startTime": start_ms, "endTime": end_ms})
+        rows = _extract_rows(payload)
+    except Exception:
+        rows = []
+
+    # Fallback: range-based snapshots stepping backward
+    if not rows:
+        day_ms = 24 * 60 * 60 * 1000
+        acc: List[Dict[str, Any]] = []
+        for win in (30, 7, 3, 1):
+            step_end = end_ms
+            used_any = False
+            while step_end > start_ms:
+                p = {**params_base, "range": f"{win}d", "endTime": step_end}
+                try:
+                    payload = client.get_json(endpoint_path, p)
+                    part = _extract_rows(payload)
+                    if part:
+                        acc.extend(part)
+                        used_any = True
+                    # Move window back by win days
+                    step_end -= win * day_ms
+                except Exception:
+                    break
+            if used_any:
+                rows = acc
+                break
+
     df = _safe_parse(LiquidationEvent, rows)
     if df.empty:
         return pd.DataFrame(columns=["ts", "liq_notional_usd_60m"])  # typed
@@ -293,7 +346,7 @@ def ingest_coinglass(
         "taker-buysell-volume": "futures/taker-buy-sell-volume/history",
         "aggregated-taker-buysell-volume-history": "futures/aggregated-taker-buy-sell-volume/history",
         "spot-aggregated-taker-buysell-history": "spot/aggregated-taker-buy-sell-volume/history",
-        "liquidation-aggregate-heatmap": "futures/liquidation/heatmap/coin/model1",
+        "liquidation-aggregate-heatmap": "futures/liquidation/heatmap/model1",
     }
 
     ep = cfg.endpoints
@@ -339,7 +392,7 @@ def ingest_coinglass(
     )
 
     typer.echo("Fetching liquidation heatmap...")
-    liq15 = _fetch_liq(client, cfg.symbol, start_ms, end_ms, ep_liq)
+    liq15 = _fetch_liq(client, cfg.symbol, start_ms, end_ms, ep_liq, exchange_pref)
 
     # Compose base join on ts
     df = price15
