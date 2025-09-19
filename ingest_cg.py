@@ -428,21 +428,26 @@ def _fetch_liq(
 def _compose_features(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     d["ts"] = pd.to_datetime(d["ts"], utc=True)
-    d = d.sort_values("ts")
+    d = d.sort_values("ts").set_index("ts").sort_index()
     # rv_15m
-    d["rv_15m"] = (
-        pd.Series(d["close"]).div(pd.Series(d["close"]).shift(1)).apply(lambda x: math.log(x) if pd.notna(x) and x > 0 else 0.0) ** 2
-    )
+    close = d["close"] if "close" in d else pd.Series(index=d.index, dtype=float)
+    ret = close.div(close.shift(1)).apply(lambda x: math.log(x) if pd.notna(x) and x > 0 else 0.0)
+    d["rv_15m"] = (ret ** 2)
     # perp taker net and CVD on 15m
-    net_perp = (d.get("taker_buy_usd", 0) - d.get("taker_sell_usd", 0)).fillna(0)
+    buy = d["taker_buy_usd"] if "taker_buy_usd" in d else pd.Series(0, index=d.index, dtype=float)
+    sell = d["taker_sell_usd"] if "taker_sell_usd" in d else pd.Series(0, index=d.index, dtype=float)
+    net_perp = (buy - sell).fillna(0)
     d["cvd_perp_15m"] = net_perp.cumsum()
     # perp/spot rolling share (60m)
-    perp_60 = pd.Series(d.get("perp_taker_buy_usd", 0)).fillna(0).add(pd.Series(d.get("perp_taker_sell_usd", 0)).fillna(0)).rolling("60min", min_periods=1).sum()
-    spot_60 = pd.Series(d.get("spot_taker_buy_usd", 0)).fillna(0).add(pd.Series(d.get("spot_taker_sell_usd", 0)).fillna(0)).rolling("60min", min_periods=1).sum()
-    denom = perp_60.add(spot_60)
-    d["perp_share_60m"] = perp_60.divide(denom.replace(0, 1e-9))
+    perp_buy = d["perp_taker_buy_usd"] if "perp_taker_buy_usd" in d else pd.Series(0, index=d.index, dtype=float)
+    perp_sell = d["perp_taker_sell_usd"] if "perp_taker_sell_usd" in d else pd.Series(0, index=d.index, dtype=float)
+    spot_buy = d["spot_taker_buy_usd"] if "spot_taker_buy_usd" in d else pd.Series(0, index=d.index, dtype=float)
+    spot_sell = d["spot_taker_sell_usd"] if "spot_taker_sell_usd" in d else pd.Series(0, index=d.index, dtype=float)
+    perp_60 = (perp_buy.fillna(0) + perp_sell.fillna(0)).rolling("60min", min_periods=1).sum()
+    spot_60 = (spot_buy.fillna(0) + spot_sell.fillna(0)).rolling("60min", min_periods=1).sum()
+    denom = (perp_60 + spot_60).replace(0, 1e-9)
+    d["perp_share_60m"] = perp_60.divide(denom)
     # Percentiles (30D) for oi and funding
-    d = d.set_index("ts").sort_index()
     if "oi_now" in d:
         d["oi_pctile_30d"] = rolling_percentile_30d(d["oi_now"]).fillna(0.5).values
     if "funding_now" in d:
