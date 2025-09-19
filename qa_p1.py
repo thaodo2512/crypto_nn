@@ -40,6 +40,7 @@ def _expected_index_180d(ts_end: pd.Timestamp) -> pd.DatetimeIndex:
 def qa_core(
     glob: str = typer.Option(..., "--glob", help="Parquet glob (e.g., data/parquet/15m/BTCUSDT/**/*.parquet)"),
     out: str = typer.Option(..., "--out", help="JSON report output path"),
+    conf: Optional[str] = typer.Option(None, "--conf", help="Optional config file for QA thresholds"),
 ) -> None:
     df = _read_parquet_glob(glob)
     if df.empty:
@@ -80,6 +81,34 @@ def qa_core(
     )
     max_impute_ratio = max(funding_impute_ratio, oi_impute_ratio)
 
+    # Feature NaN checks (core transforms)
+    feature_cols = [
+        c for c in [
+            "rv_15m",
+            "cvd_perp_15m",
+            "perp_share_60m",
+            "oi_pctile_30d",
+            "funding_pctile_30d",
+        ] if c in aligned.columns
+    ]
+    nan_counts = {c: int(aligned[c].isna().sum()) for c in feature_cols}
+
+    # Thresholds (defaults, optionally from conf)
+    missing_ratio_max = 0.005
+    impute_ratio_max = 0.05
+    no_nan_after_transform = True
+    if conf:
+        try:
+            import yaml
+
+            cfg = yaml.safe_load(Path(conf).read_text()) or {}
+            qa = cfg.get("qa_targets", {})
+            missing_ratio_max = float(qa.get("missing_ratio_max", missing_ratio_max))
+            impute_ratio_max = float(qa.get("impute_ratio_max", impute_ratio_max))
+            no_nan_after_transform = bool(qa.get("no_nan_after_transform", no_nan_after_transform))
+        except Exception:
+            pass
+
     report = {
         "window": {
             "start": expected_idx[0].isoformat(),
@@ -94,6 +123,7 @@ def qa_core(
             "funding": funding_impute_ratio,
             "oi": oi_impute_ratio,
         },
+        "nan_counts": nan_counts,
     }
 
     Path(out).parent.mkdir(parents=True, exist_ok=True)
@@ -101,7 +131,9 @@ def qa_core(
         json.dump(report, f, indent=2)
 
     # Fail on thresholds
-    fail = (gaps_ratio > 0.005) or (max_impute_ratio > 0.05)
+    fail = (gaps_ratio > missing_ratio_max) or (max_impute_ratio > impute_ratio_max)
+    if no_nan_after_transform and any(v > 0 for v in nan_counts.values()):
+        fail = True
     if fail:
         typer.echo("QA failed: gaps or imputation above thresholds.")
         raise typer.Exit(code=1)
@@ -112,13 +144,16 @@ def qa_core(
 def duckdb_view(
     glob: str = typer.Option(..., "--glob", help="Parquet glob to create a DuckDB view for"),
     view: str = typer.Option("bars_15m", "--view", help="View name to create"),
+    db: Optional[str] = typer.Option(None, "--db", help="Optional DuckDB file to persist the view (e.g., meta/duckdb/p1.duckdb)"),
 ) -> None:
-    con = duckdb.connect()
+    # Use in-memory if db is None; else persist in file
+    con = duckdb.connect(database=db or ":memory:")
     try:
         con.execute(f"CREATE OR REPLACE VIEW {view} AS SELECT * FROM read_parquet('{glob}')")
         # Demonstrate the view exists by counting rows quickly
         cnt = con.execute(f"SELECT COUNT(*) FROM {view}").fetchone()[0]
-        typer.echo(f"Created DuckDB view '{view}' with ~{cnt} rows.")
+        loc = db or "<memory>"
+        typer.echo(f"Created DuckDB view '{view}' in {loc} with ~{cnt} rows.")
     finally:
         con.close()
 

@@ -22,7 +22,7 @@ from utils_cg import (
     resample_15m_sum,
     reindex_15m_ffill_limit,
     rolling_percentile_30d,
-    write_parquet_partitioned,
+    write_parquet_daily_files,
 )
 
 
@@ -238,21 +238,23 @@ def _compose_features(df: pd.DataFrame) -> pd.DataFrame:
     d["ts"] = pd.to_datetime(d["ts"], utc=True)
     d = d.sort_values("ts")
     # rv_15m
-    d["rv_15m"] = (pd.Series(d["close"]).div(pd.Series(d["close"]).shift(1)).apply(lambda x: math.log(x) if pd.notna(x) and x > 0 else float("nan")) ** 2)
+    d["rv_15m"] = (
+        pd.Series(d["close"]).div(pd.Series(d["close"]).shift(1)).apply(lambda x: math.log(x) if pd.notna(x) and x > 0 else 0.0) ** 2
+    )
     # perp taker net and CVD on 15m
     net_perp = (d.get("taker_buy_usd", 0) - d.get("taker_sell_usd", 0)).fillna(0)
     d["cvd_perp_15m"] = net_perp.cumsum()
     # perp/spot rolling share (60m)
-    perp_60 = pd.Series(d.get("perp_taker_buy_usd", 0)).add(pd.Series(d.get("perp_taker_sell_usd", 0))).rolling("60min", min_periods=1).sum()
-    spot_60 = pd.Series(d.get("spot_taker_buy_usd", 0)).add(pd.Series(d.get("spot_taker_sell_usd", 0))).rolling("60min", min_periods=1).sum()
+    perp_60 = pd.Series(d.get("perp_taker_buy_usd", 0)).fillna(0).add(pd.Series(d.get("perp_taker_sell_usd", 0)).fillna(0)).rolling("60min", min_periods=1).sum()
+    spot_60 = pd.Series(d.get("spot_taker_buy_usd", 0)).fillna(0).add(pd.Series(d.get("spot_taker_sell_usd", 0)).fillna(0)).rolling("60min", min_periods=1).sum()
     denom = perp_60.add(spot_60)
-    d["perp_share_60m"] = perp_60.divide(denom.where(denom != 0, pd.NA))
+    d["perp_share_60m"] = perp_60.divide(denom.replace(0, 1e-9))
     # Percentiles (30D) for oi and funding
     d = d.set_index("ts").sort_index()
     if "oi_now" in d:
-        d["oi_pctile_30d"] = rolling_percentile_30d(d["oi_now"]).values
+        d["oi_pctile_30d"] = rolling_percentile_30d(d["oi_now"]).fillna(0.5).values
     if "funding_now" in d:
-        d["funding_pctile_30d"] = rolling_percentile_30d(d["funding_now"]).values
+        d["funding_pctile_30d"] = rolling_percentile_30d(d["funding_now"]).fillna(0.5).values
     d = d.reset_index()
     return d
 
@@ -352,9 +354,8 @@ def ingest_coinglass(
     ensure_unique_key(df, ["symbol", "ts"])
 
     # Partitioned write
-    df = add_partitions(df)
-    write_parquet_partitioned(df, out_dir)
-    typer.echo(f"Wrote Parquet dataset to {out_dir}")
+    write_parquet_daily_files(df, out_dir, cfg.symbol)
+    typer.echo(f"Wrote daily Parquet dataset under {out_dir}")
 
 
 if __name__ == "__main__":

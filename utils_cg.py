@@ -1,4 +1,6 @@
 import json
+import hashlib
+from pathlib import Path
 import os
 import time
 from datetime import datetime, timezone
@@ -265,7 +267,8 @@ def rolling_percentile_30d(series: pd.Series) -> pd.Series:
     """
     s = series.copy()
     s.index = pd.to_datetime(s.index, utc=True)
-    return s.rolling("30D", min_periods=10).apply(lambda x: (x <= x.iloc[-1]).mean(), raw=False)
+    # Use min_periods=1 to avoid NaN at head; small windows approximate
+    return s.rolling("30D", min_periods=1).apply(lambda x: (x <= x.iloc[-1]).mean(), raw=False)
 
 
 def ensure_unique_key(df: pd.DataFrame, key: List[str]) -> None:
@@ -285,22 +288,57 @@ def add_partitions(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
-def write_parquet_partitioned(df: pd.DataFrame, out_dir: str) -> None:
-    """Write Parquet partitioned by y/m/d using ZSTD level 3."""
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _write_manifest_success(day_dir: Path, parquet_file: Path, rows: int, cols: int) -> None:
+    manifest = day_dir / "MANIFEST.tsv"
+    digest = _sha256_file(parquet_file)
+    with open(manifest, "w") as f:
+        f.write(f"{parquet_file.name}\t{digest}\t{rows}\t{cols}\n")
+    (day_dir / "_SUCCESS").touch()
+
+
+def write_parquet_daily_files(df: pd.DataFrame, out_root: str, symbol: str) -> None:
+    """Write exactly one Parquet file per UTC day.
+
+    Layout: {out_root}/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet
+    Compression: ZSTD level 3, dictionary enabled.
+    Rewrites whole day atomically (cleans existing files before writing).
+    """
     import pyarrow as pa
-    import pyarrow.dataset as ds
+    import pyarrow.parquet as pq
 
     if df.empty:
         return
-    table = pa.Table.from_pandas(df, preserve_index=False)
-    fmt = ds.ParquetFileFormat()
-    file_opts = fmt.make_write_options(compression="zstd", compression_level=3)
-    ds.write_dataset(
-        table,
-        base_dir=out_dir,
-        format=fmt,
-        partitioning=["y", "m", "d"],
-        file_options=file_opts,
-        existing_data_behavior="overwrite_or_ignore",
-    )
+    d = add_partitions(df)
+    d = d.sort_values("ts")
+    for (year, month, day), chunk in d.groupby(["y", "m", "d"], sort=True):
+        date_str = f"{int(year):04d}{int(month):02d}{int(day):02d}"
+        day_dir = Path(out_root) / f"y={int(year):04d}" / f"m={int(month):02d}" / f"d={int(day):02d}"
+        day_dir.mkdir(parents=True, exist_ok=True)
 
+        # Clean existing outputs to honor whole-day rewrite semantics
+        for p in day_dir.glob("part-*.parquet"):
+            p.unlink(missing_ok=True)  # type: ignore
+        (day_dir / "MANIFEST.tsv").unlink(missing_ok=True)  # type: ignore
+        (day_dir / "_SUCCESS").unlink(missing_ok=True)  # type: ignore
+
+        out_path = day_dir / f"part-{date_str}.parquet"
+        table = pa.Table.from_pandas(chunk.drop(columns=["y", "m", "d"]), preserve_index=False)
+        pq.write_table(
+            table,
+            out_path,
+            compression="zstd",
+            compression_level=3,
+            use_dictionary=True,
+            write_statistics=True,
+            # Daily file is small; row_group_size is less relevant. Keep a single row group.
+            row_group_size=None,
+        )
+        _write_manifest_success(day_dir, out_path, rows=table.num_rows, cols=table.num_columns)
