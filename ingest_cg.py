@@ -105,12 +105,20 @@ def _safe_parse(model, rows: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame.from_records(recs)
 
 
-def _fetch_price_ohlc(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
+def _fetch_price_ohlc(
+    client: CGClient,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    endpoint_path: str,
+    timeframe: str,
+    exchange_preference: Optional[str] = None,
+) -> pd.DataFrame:
     # Endpoint naming may differ; these params are typical
-    rows = client.get_paginated(
-        path=endpoint_path,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
-    )
+    params = {"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe}
+    if exchange_preference:
+        params.update({"exchange": exchange_preference, "exchangeName": exchange_preference})
+    rows = client.get_paginated(path=endpoint_path, params=params)
     df = _safe_parse(PriceBar, rows)
     return resample_15m_ohlcv(df)
 
@@ -171,11 +179,19 @@ def _fetch_funding(
     return pd.DataFrame(columns=["ts", "funding_now", "funding_now_imputed"])  # typed
 
 
-def _fetch_taker_perp(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str) -> pd.DataFrame:
-    rows = client.get_paginated(
-        path=endpoint_path,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
-    )
+def _fetch_taker_perp(
+    client: CGClient,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    endpoint_path: str,
+    timeframe: str,
+    exchange_preference: Optional[str] = None,
+) -> pd.DataFrame:
+    params = {"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe}
+    if exchange_preference:
+        params.update({"exchange": exchange_preference, "exchangeName": exchange_preference})
+    rows = client.get_paginated(path=endpoint_path, params=params)
     df = _safe_parse(TakerVolumeBar, rows)
     if df.empty:
         return pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # typed
@@ -189,11 +205,12 @@ def _fetch_taker_spot_agg(
     end_ms: int,
     endpoint_spot_agg: str,
     endpoint_fut_agg: str,
+    timeframe: str,
 ) -> pd.DataFrame:
     # Aggregate spot and perp taker volumes if endpoint available
     rows_spot = client.get_paginated(
         path=endpoint_spot_agg,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
+        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
     )
     spot_df = _safe_parse(TakerVolumeBar, rows_spot)
     spot_15 = resample_15m_sum(spot_df, ["taker_buy_usd", "taker_sell_usd"]) if not spot_df.empty else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
@@ -204,7 +221,7 @@ def _fetch_taker_spot_agg(
         })
     rows_perp_agg = client.get_paginated(
         path=endpoint_fut_agg,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms},
+        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
     )
     perp_df = _safe_parse(TakerVolumeBar, rows_perp_agg)
     perp_15 = resample_15m_sum(perp_df, ["taker_buy_usd", "taker_sell_usd"]) if not perp_df.empty else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
@@ -365,7 +382,10 @@ def ingest_coinglass(
     fallback_agg = bool(scope.get("fallback_agg", True))
 
     typer.echo("Fetching price OHLC...")
-    price15 = _fetch_price_ohlc(client, cfg.symbol, start_ms, end_ms, ep_price)
+    price15 = _fetch_price_ohlc(client, cfg.symbol, start_ms, end_ms, ep_price, cfg.timeframe, exchange_pref)
+    if price15.empty:
+        typer.echo("No OHLCV returned. Check API key, symbol, exchange, and interval=15m support.")
+        raise typer.Exit(code=1)
 
     typer.echo("Fetching OI...")
     oi15 = _fetch_oi(client, cfg.symbol, start_ms, end_ms, ep_oi)
@@ -384,11 +404,13 @@ def ingest_coinglass(
     )
 
     typer.echo("Fetching perp taker volumes...")
-    perp_taker15 = _fetch_taker_perp(client, cfg.symbol, start_ms, end_ms, ep_taker_perp)
+    perp_taker15 = _fetch_taker_perp(
+        client, cfg.symbol, start_ms, end_ms, ep_taker_perp, cfg.timeframe, exchange_pref
+    )
 
     typer.echo("Fetching spot/perp aggregated taker volumes...")
     agg_taker15 = _fetch_taker_spot_agg(
-        client, cfg.symbol, start_ms, end_ms, ep_taker_spot_agg, ep_taker_fut_agg
+        client, cfg.symbol, start_ms, end_ms, ep_taker_spot_agg, ep_taker_fut_agg, cfg.timeframe
     )
 
     typer.echo("Fetching liquidation heatmap...")
