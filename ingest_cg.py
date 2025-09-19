@@ -119,6 +119,32 @@ def _normalize_exchange(name: Optional[str]) -> Optional[str]:
     return mapping.get(str(name).upper(), name)
 
 
+def _build_params(symbol: str, start_ms: int, end_ms: int, timeframe: Optional[str] = None, exchange: Optional[str] = None, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    ex = _normalize_exchange(exchange)
+    p: Dict[str, Any] = {
+        "symbol": symbol,
+        "pair": symbol,
+        "symbolName": symbol,
+        "startTime": start_ms,
+        "start_time": start_ms,
+        "from": start_ms,
+        "fromTime": start_ms,
+        "start": start_ms,
+        "endTime": end_ms,
+        "end_time": end_ms,
+        "to": end_ms,
+        "toTime": end_ms,
+        "end": end_ms,
+    }
+    if timeframe:
+        p.update({"interval": timeframe, "granularity": timeframe, "resolution": timeframe})
+    if ex:
+        p.update({"exchange": ex, "exchangeName": ex})
+    if extra:
+        p.update(extra)
+    return p
+
+
 def _fetch_price_ohlc(
     client: CGClient,
     symbol: str,
@@ -129,20 +155,14 @@ def _fetch_price_ohlc(
     exchange_preference: Optional[str] = None,
 ) -> pd.DataFrame:
     # Endpoint naming may differ; these params are typical
-    params = {"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe}
-    ex = _normalize_exchange(exchange_preference)
-    if ex:
-        params.update({"exchange": ex, "exchangeName": ex})
+    params = _build_params(symbol, start_ms, end_ms, timeframe, exchange_preference)
     rows = client.get_list(path=endpoint_path, params=params)
     df = _safe_parse(PriceBar, rows)
     return resample_15m_ohlcv(df)
 
 
 def _fetch_oi(client: CGClient, symbol: str, start_ms: int, end_ms: int, endpoint_path: str, timeframe: str) -> pd.DataFrame:
-    rows = client.get_list(
-        path=endpoint_path,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
-    )
+    rows = client.get_list(path=endpoint_path, params=_build_params(symbol, start_ms, end_ms, timeframe))
     df = _safe_parse(OIBar, rows)
     if df.empty:
         return pd.DataFrame(columns=["ts", "oi_now"])  # typed
@@ -203,10 +223,7 @@ def _fetch_taker_perp(
     timeframe: str,
     exchange_preference: Optional[str] = None,
 ) -> pd.DataFrame:
-    params = {"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe}
-    ex = _normalize_exchange(exchange_preference)
-    if ex:
-        params.update({"exchange": ex, "exchangeName": ex})
+    params = _build_params(symbol, start_ms, end_ms, timeframe, exchange_preference)
     rows = client.get_list(path=endpoint_path, params=params)
     df = _safe_parse(TakerVolumeBar, rows)
     if df.empty:
@@ -224,10 +241,7 @@ def _fetch_taker_spot_agg(
     timeframe: str,
 ) -> pd.DataFrame:
     # Aggregate spot and perp taker volumes if endpoint available
-    rows_spot = client.get_list(
-        path=endpoint_spot_agg,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
-    )
+    rows_spot = client.get_list(path=endpoint_spot_agg, params=_build_params(symbol, start_ms, end_ms, timeframe))
     spot_df = _safe_parse(TakerVolumeBar, rows_spot)
     spot_15 = resample_15m_sum(spot_df, ["taker_buy_usd", "taker_sell_usd"]) if not spot_df.empty else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
     if not spot_15.empty:
@@ -235,10 +249,7 @@ def _fetch_taker_spot_agg(
             "taker_buy_usd": "spot_taker_buy_usd",
             "taker_sell_usd": "spot_taker_sell_usd",
         })
-    rows_perp_agg = client.get_list(
-        path=endpoint_fut_agg,
-        params={"symbol": symbol, "startTime": start_ms, "endTime": end_ms, "interval": timeframe},
-    )
+    rows_perp_agg = client.get_list(path=endpoint_fut_agg, params=_build_params(symbol, start_ms, end_ms, timeframe))
     perp_df = _safe_parse(TakerVolumeBar, rows_perp_agg)
     perp_15 = resample_15m_sum(perp_df, ["taker_buy_usd", "taker_sell_usd"]) if not perp_df.empty else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
     if not perp_15.empty:
