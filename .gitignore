@@ -1,0 +1,20 @@
+# Secrets directory
+secrets/*
+!secrets/.gitkeep
+!secrets/.env.example
+!secrets/README.md
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual envs
+.venv/
+
+# Data outputs (optional, keep parquet out of git)
+data/**
+!data/.gitkeep
+reports/**
+!reports/.gitkeep
+
