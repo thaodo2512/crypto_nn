@@ -166,7 +166,23 @@ def _timeslice_fetch(
             exchange,
             extra={**(extra or {}), "limit": limit},
         )
-        rows = client.get_list(path, params)
+        # Debug log
+        if os.getenv("DEBUG") == "1":
+            try:
+                import pprint
+
+                pprint.pprint({"request": {"url": f"{client.base_url}/{path}", "params": params}})
+            except Exception:
+                pass
+        payload = client.get_json(path, params)
+        rows = client._extract_records(payload)
+        if os.getenv("DEBUG") == "1":
+            try:
+                keys = list(payload.keys()) if isinstance(payload, dict) else type(payload).__name__
+                sample = rows[0] if rows else None
+                print(f"response keys: {keys}, rows: {len(rows)}, sample_keys: {list(sample.keys()) if isinstance(sample, dict) else None}")
+            except Exception:
+                pass
         if rows:
             results.extend(rows)
         cur = nxt
@@ -385,6 +401,7 @@ def _compose_features(df: pd.DataFrame) -> pd.DataFrame:
 @ingest_app.command("coinglass")
 def ingest_coinglass(
     conf: str = typer.Option(..., "--conf", help="YAML config path (p1_inputs_cg.yaml)"),
+    debug: bool = typer.Option(False, "--debug", help="Enable verbose debug logging"),
 ) -> None:
     """Ingest CoinGlass endpoints and build 15m Parquet with features."""
     cfg = _load_config(conf)
@@ -435,6 +452,8 @@ def ingest_coinglass(
     fallback_agg = bool(scope.get("fallback_agg", True))
 
     typer.echo("Fetching price OHLC...")
+    if debug:
+        typer.echo(f"Endpoint: {client.base_url}/{ep_price}")
     price15 = _fetch_price_ohlc(client, cfg.symbol, start_ms, end_ms, ep_price, cfg.timeframe, exchange_pref)
     if price15.empty:
         typer.echo("No OHLCV returned. Check API key, symbol, exchange, and interval=15m support.")

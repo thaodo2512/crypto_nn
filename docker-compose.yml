@@ -17,6 +17,14 @@ services:
       "python", "ingest_cg.py", "ingest", "coinglass",
       "--conf", "conf/p1_inputs_cg.yaml"
     ]
+  ingest_debug:
+    <<: *app
+    environment:
+      - DEBUG=1
+    command: [
+      "python", "ingest_cg.py", "ingest", "coinglass",
+      "--conf", "conf/p1_inputs_cg.yaml", "--debug"
+    ]
 
   qa:
     <<: *app
