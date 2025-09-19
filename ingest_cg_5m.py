@@ -109,6 +109,7 @@ def ingest_coinglass(
     out: str = typer.Option("data/parquet/5m/BTCUSDT", "--out"),
     exchange: Optional[str] = typer.Option("BINANCE", "--exchange"),
     base_url: str = typer.Option(DEFAULT_BASE_URL, "--base-url"),
+    verbose: bool = typer.Option(True, "--verbose/--no-verbose", help="Print progress logs"),
 ) -> None:
     if source.lower() != "coinglass":
         raise typer.BadParameter("Only 'coinglass' source is supported")
@@ -121,6 +122,10 @@ def ingest_coinglass(
     now = pd.Timestamp.now(tz="UTC")
     start_ms = int((now - pd.Timedelta(days=args.days)).value // 1_000_000)
     end_ms = int(now.value // 1_000_000)
+    if verbose:
+        typer.echo(
+            f"[P1-5m] Symbol={args.symbol} tf={args.tf} days={args.days} window={pd.to_datetime(start_ms, unit='ms', utc=True)}→{pd.to_datetime(end_ms, unit='ms', utc=True)}"
+        )
 
     client = CGClient(base_url=args.base_url)
 
@@ -135,15 +140,21 @@ def ingest_coinglass(
     ep_liq = "futures/liquidation/heatmap/model1"
 
     # Fetch price (base grid)
+    if verbose:
+        typer.echo("Fetching price OHLC (5m)...")
     price_rows = _timeslice_fetch(client, ep_price, args.symbol, start_ms, end_ms, args.tf, args.exchange)
     price_df = _safe_parse(PriceBar, price_rows)
     price_5 = resample_5m_ohlcv(price_df)
+    if verbose:
+        typer.echo(f"  price rows: raw={len(price_df):,}, resampled={len(price_5):,}")
 
     if price_5.empty:
         typer.echo("No OHLCV rows; aborting.")
         raise typer.Exit(code=1)
 
     # OI aggregated → 5m (last) then ffill≤3
+    if verbose:
+        typer.echo("Fetching open interest (aggregated → 5m last, ffill≤3)...")
     oi_rows = _timeslice_fetch(client, ep_oi_agg, args.symbol, start_ms, end_ms, args.tf, None)
     oi_df = _safe_parse(OIBar, oi_rows)
     oi_5 = pd.DataFrame(columns=["ts", "oi_now"]) if oi_df.empty else (
@@ -154,6 +165,8 @@ def ingest_coinglass(
     oi_5 = oi_5.rename(columns={"oi_now_imputed": "_imputed_oi_now"})
 
     # Funding: try per-exchange list; fallback to oi-weighted
+    if verbose:
+        typer.echo("Fetching funding (oi-weight or exchange list, ffill≤3)...")
     fund_rows = _timeslice_fetch(client, ep_fund_oiw, args.symbol, start_ms, end_ms, args.tf, None)
     fund_df = _safe_parse(FundingBar, fund_rows)
     if fund_df.empty:
@@ -163,17 +176,23 @@ def ingest_coinglass(
     fund_5 = fund_5.rename(columns={"funding_now_imputed": "_imputed_funding_now"})
 
     # Futures taker buy/sell → sum to 5m
+    if verbose:
+        typer.echo("Fetching futures taker buy/sell (sum→5m)...")
     taker_rows = _timeslice_fetch(client, ep_taker_fut, args.symbol, start_ms, end_ms, args.tf, args.exchange)
     taker_df = _safe_parse(TakerVolumeBar, taker_rows)
     taker_5 = resample_5m_sum(taker_df, ["taker_buy_usd", "taker_sell_usd"]) if not taker_df.empty else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
 
     # Optionals: spot/perp aggregated takers
+    if verbose:
+        typer.echo("Fetching aggregated spot taker (optional, sum→5m)...")
     spot_rows = _timeslice_fetch(client, ep_taker_spot_agg, args.symbol, start_ms, end_ms, args.tf, None)
     spot_df = _safe_parse(TakerVolumeBar, spot_rows)
     spot_5 = resample_5m_sum(spot_df, ["taker_buy_usd", "taker_sell_usd"]) if not spot_df.empty else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
     if not spot_5.empty:
         spot_5 = spot_5.rename(columns={"taker_buy_usd": "spot_taker_buy_usd", "taker_sell_usd": "spot_taker_sell_usd"})
 
+    if verbose:
+        typer.echo("Fetching aggregated futures taker (optional, sum→5m)...")
     futagg_rows = _timeslice_fetch(client, ep_taker_fut_agg, args.symbol, start_ms, end_ms, args.tf, None)
     futagg_df = _safe_parse(TakerVolumeBar, futagg_rows)
     futagg_5 = resample_5m_sum(futagg_df, ["taker_buy_usd", "taker_sell_usd"]) if not futagg_df.empty else pd.DataFrame(columns=["ts", "taker_buy_usd", "taker_sell_usd"])  # type: ignore
@@ -181,6 +200,8 @@ def ingest_coinglass(
         futagg_5 = futagg_5.rename(columns={"taker_buy_usd": "perp_taker_buy_usd", "taker_sell_usd": "perp_taker_sell_usd"})
 
     # Liquidation notional aggregated to 5m
+    if verbose:
+        typer.echo("Fetching liquidation heatmap (sum→5m)...")
     liq_rows = _timeslice_fetch(client, ep_liq, args.symbol, start_ms, end_ms, args.tf, args.exchange)
     liq_df = _safe_parse(LiquidationEvent, liq_rows)
     liq_5 = resample_5m_sum(liq_df, ["notional_usd"]).rename(columns={"notional_usd": "liq_notional_raw"}) if not liq_df.empty else pd.DataFrame(columns=["ts", "liq_notional_raw"])  # type: ignore
@@ -207,6 +228,8 @@ def ingest_coinglass(
 
     # Daily partitioned write
     write_parquet_daily_files(base, args.out, args.symbol)
+    if verbose:
+        typer.echo(f"Wrote daily Parquet under {args.out} (rows={len(base):,})")
 
     # Emit simple sources map
     Path("reports").mkdir(parents=True, exist_ok=True)
