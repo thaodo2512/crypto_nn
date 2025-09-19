@@ -90,7 +90,7 @@ def _safe_parse(model, rows: List[Dict[str, Any]]) -> pd.DataFrame:
     for r in rows:
         try:
             rec = model.from_raw(r)
-            recs.append(rec.dict())
+            recs.append(rec.model_dump())
         except Exception:
             continue
     return pd.DataFrame.from_records(recs)
