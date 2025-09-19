@@ -270,7 +270,7 @@ def ingest_coinglass(
         start_ms = _ts_to_epoch_ms(str(cfg.start))
         end_ms = _ts_to_epoch_ms(str(cfg.end))
     else:
-        now = pd.Timestamp.utcnow().tz_localize("UTC")
+        now = pd.Timestamp.now(tz="UTC")
         hz = cfg.horizon_days or 180
         start_ms = int((now - pd.Timedelta(days=hz)).value // 1_000_000)
         end_ms = int(now.value // 1_000_000)
