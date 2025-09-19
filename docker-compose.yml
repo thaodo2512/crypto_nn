@@ -135,3 +135,16 @@ services:
       "--cost", "bps:5",
       "--out", "reports/p6_oos_summary.json"
     ]
+
+  # P7 – EV gating policy
+  p7_decide:
+    <<: *app
+    command: [
+      "python", "policy_p7.py", "decide",
+      "--probs", "artifacts/p6_calibrated.parquet",
+      "--atr", "data/atr_5m.parquet",
+      "--k-range-min", "1.0",
+      "--k-range-max", "1.5",
+      "--H", "36",
+      "--out", "decisions"
+    ]

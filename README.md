@@ -12,6 +12,7 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Labels P3: `make p3_label`
   - Sampling P4: `make p4_sampling` (rebuild image first)
   - Train P5: `make p5_train` (rebuild image first)
+  - Policy P7: `docker compose run --rm p7_decide`
 
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
@@ -142,3 +143,12 @@ out_dir: data/parquet/15m/BTCUSDT
 - CV: purged walk-forward with 1-day embargo, deterministic seed; checkpoints per fold under `models/gru_5m/<fold>/best.pt`.
 - Metrics: `reports/p5_cv_metrics.json`; logs under `logs/p5_train.log`.
 - Note: requires PyTorch; rebuild Docker image after adding P5 deps.
+
+## Phase P6 – Calibration + Ensemble + τ Tuning
+- Calibrate temps: `docker compose run --rm p6_calibrate`
+- Ensemble by EV weights: `docker compose run --rm p6_ensemble`
+- Tune τ: `docker compose run --rm p6_tune_threshold`
+
+## Phase P7 – EV Gating Policy
+- Decide: `python policy_p7.py decide --probs artifacts/p6_calibrated.parquet --atr data/atr_5m.parquet --k-range-min 1.0 --k-range-max 1.5 --H 36 --out decisions/`
+- Output (partitioned): `decisions/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet` with columns ts, side, size, TP_px, SL_px, EV, reason.
