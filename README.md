@@ -13,6 +13,7 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Sampling P4: `make p4_sampling` (rebuild image first)
   - Train P5: `make p5_train` (rebuild image first)
   - Policy P7: `docker compose run --rm p7_decide`
+  - Export P8: `docker compose run --rm p8_export` (rebuild image first)
 
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
@@ -152,3 +153,9 @@ out_dir: data/parquet/15m/BTCUSDT
 ## Phase P7 – EV Gating Policy
 - Decide: `python policy_p7.py decide --probs artifacts/p6_calibrated.parquet --atr data/atr_5m.parquet --k-range-min 1.0 --k-range-max 1.5 --H 36 --out decisions/`
 - Output (partitioned): `decisions/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet` with columns ts, side, size, TP_px, SL_px, EV, reason.
+
+## Phase P8 – ONNX FP16 Export + Parity
+- Docker: `docker compose run --rm p8_export`
+- Local: `python export_p8.py onnx --ckpt "models/gru_5m/*/best.pt" --fp16 --out export/model_5m_fp16.onnx --preproc conf/preproc_5m.yaml --calib models/ensemble_5m.json --window 144 --sample 16`
+- Outputs: `export/model_5m_fp16.onnx`, `reports/p8_parity.json` (MSE, sha256), logs in `logs/p8_export.log`.
+- Acceptance: parity MSE < 1e-3 and checksum logged.

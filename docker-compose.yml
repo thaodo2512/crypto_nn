@@ -148,3 +148,17 @@ services:
       "--H", "36",
       "--out", "decisions"
     ]
+
+  # P8 – ONNX FP16 export + parity check
+  p8_export:
+    <<: *app
+    command: [
+      "python", "export_p8.py", "onnx",
+      "--ckpt", "models/gru_5m/*/best.pt",
+      "--fp16",
+      "--out", "export/model_5m_fp16.onnx",
+      "--preproc", "conf/preproc_5m.yaml",
+      "--calib", "models/ensemble_5m.json",
+      "--window", "144",
+      "--sample", "16"
+    ]
