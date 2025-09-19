@@ -84,14 +84,17 @@ services:
     command: [
       "python", "features_p2.py", "validate",
       "--glob", "data/features/5m/BTCUSDT/**/*.parquet",
-      "--qa", "reports/p2_qa.json"
+      "--qa", "reports/p2_qa_5m_80d.json",
+      "--schema", "reports/p2_feature_schema.json",
+      "--horizon_days", "80",
+      "--warmup", "8640"
     ]
   features_bench:
     <<: *app
     command: [
       "python", "features_p2.py", "bench",
       "--glob", "data/features/5m/BTCUSDT/**/*.parquet",
-      "--report", "reports/p2_bench.csv"
+      "--report", "reports/p2_bench_5m_80d.csv"
     ]
   duck_view_feat:
     <<: *app

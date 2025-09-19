@@ -6,9 +6,9 @@ from utils_cg import ensure_unique_key, reindex_5m_ffill_limit
 from qa_p1_5m import evaluate_qa
 
 
-def test_expected_count_180d():
-    idx = pd.date_range("2024-01-01", periods=180*24*12, freq="5min", tz="UTC")
-    assert len(idx) == 51840
+def test_expected_count_80d():
+    idx = pd.date_range("2024-01-01", periods=80*24*12, freq="5min", tz="UTC")
+    assert len(idx) == 23040
 
 
 def test_right_closed_grid():
@@ -54,6 +54,5 @@ def test_acceptance_gate():
         "_imputed_oi_now": 0,
     })
     report, fail = evaluate_qa(df, horizon_days=1)
-    assert report["expected_bars_180d"] == 180 * 24 * 12
+    assert report["expected_bars_80d"] == 1 * 24 * 12
     assert fail is False
-

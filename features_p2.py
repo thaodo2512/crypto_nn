@@ -175,9 +175,22 @@ def build_features(
         vol_z = zscore_causal(winsorize_causal(safe_log1p(g["volume"]), warmup, winsor_low, winsor_high), warmup)
         oi_z = zscore_causal(winsorize_causal(safe_log1p(oi_imp.values), warmup, winsor_low, winsor_high), warmup)
         fund_now_z = zscore_causal(winsorize_causal(fund_imp.values, warmup, winsor_low, winsor_high), warmup)
-        cvd_diff = diff_series(g["cvd_perp_5m"]) if "cvd_perp_5m" in g else pd.Series(index=g.index, dtype=float)
+
+        # CVD and diffs
+        if "cvd_perp_5m" in g:
+            cvd_perp_5m = g["cvd_perp_5m"].astype(float)
+        else:
+            buy = g.get("taker_buy_usd", pd.Series(0.0, index=g.index))
+            sell = g.get("taker_sell_usd", pd.Series(0.0, index=g.index))
+            cvd_perp_5m = (buy - sell).fillna(0.0).cumsum()
+        cvd_diff = diff_series(cvd_perp_5m)
         cvd_diff_z = zscore_causal(winsorize_causal(cvd_diff, warmup, winsor_low, winsor_high), warmup)
-        liq60_z = zscore_causal(winsorize_causal(safe_log1p(g["liq_notional_60m"]), warmup, winsor_low, winsor_high), warmup)
+        # Liquidations 60m roll from raw if needed
+        if "liq_notional_60m" in g:
+            liq60_base = g["liq_notional_60m"].astype(float)
+        else:
+            liq60_base = g.get("liq_notional_raw", pd.Series(0.0, index=g.index)).astype(float).rolling("60min", min_periods=1).sum()
+        liq60_z = zscore_causal(winsorize_causal(safe_log1p(liq60_base), warmup, winsor_low, winsor_high), warmup)
         rv_5m_z = zscore_causal(winsorize_causal(g["rv_5m"], warmup, winsor_low, winsor_high), warmup)
 
         # Perp share pass-through (ensure finite)
@@ -197,6 +210,7 @@ def build_features(
             "oi_z": oi_z,
             "fund_now_z": fund_now_z,
             "funding_pctile_30d": g["funding_pctile_30d"].astype(float),
+            "cvd_perp_5m": cvd_perp_5m,
             "cvd_diff_z": cvd_diff_z,
             "perp_share_60m": perp_share_60m,
             "liq60_z": liq60_z,
@@ -257,8 +271,10 @@ def build(
 @app.command("validate")
 def validate(
     glob: str = typer.Option(..., "--glob", help="Features Parquet glob"),
-    qa: str = typer.Option(..., "--qa", help="QA report JSON path"),
-    horizon_days: int = typer.Option(180, "--horizon_days", help="Window for expected bars"),
+    qa: str = typer.Option("reports/p2_qa_5m_80d.json", "--qa", help="QA report JSON path"),
+    schema: str = typer.Option("reports/p2_feature_schema.json", "--schema", help="Output schema JSON path"),
+    horizon_days: int = typer.Option(80, "--horizon_days", help="Window (days) to validate; default 80"),
+    warmup: int = typer.Option(8640, "--warmup", help="Warmup bars to ignore at head; default 8640"),
 ) -> None:
     df = read_parquet_glob(glob)
     if df.empty:
@@ -270,8 +286,10 @@ def validate(
 
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     ts_end = df["ts"].max()
-    ts_start = ts_end - pd.Timedelta(days=horizon_days)
-    expected_idx = pd.date_range(ts_start, ts_end, freq="5min")
+    # Use last (horizon_days - 30) days for acceptance since warmup=30d
+    usable_days = max(0, horizon_days - 30)
+    start_usable = ts_end - pd.Timedelta(days=usable_days)
+    expected_idx = pd.date_range(start_usable, ts_end, freq="5min")
     window = df[(df["ts"] >= expected_idx[0]) & (df["ts"] <= expected_idx[-1])].copy()
 
     # Keys and basic counts
@@ -320,15 +338,21 @@ def validate(
         }
 
     report = {
-        "expected_bars": expected_bars,
-        "present_bars": present_bars,
-        "gap_ratio": gap_ratio,
+        "usable_expected_bars_50d": int(50 * 24 * 12) if horizon_days == 80 else expected_bars,
+        "present_bars_after_warmup": present_bars,
+        "gap_ratio_after_warmup": gap_ratio,
         "dup_key_count": dup_key_count,
         "per_column": per_column,
     }
     Path(qa).parent.mkdir(parents=True, exist_ok=True)
     with open(qa, "w") as f:
         json.dump(report, f, indent=2)
+
+    # Emit feature schema
+    schema_dict = {c: str(df[c].dtype) for c in sorted(df.columns)}
+    Path(schema).parent.mkdir(parents=True, exist_ok=True)
+    with open(schema, "w") as f:
+        json.dump(schema_dict, f, indent=2)
 
     # Acceptance gate
     fail = False
@@ -348,7 +372,7 @@ def validate(
 @app.command("bench")
 def bench(
     glob: str = typer.Option(..., "--glob", help="Features Parquet glob"),
-    report: str = typer.Option(..., "--report", help="CSV path for benchmark results"),
+    report: str = typer.Option("reports/p2_bench_5m_80d.csv", "--report", help="CSV path for benchmark results"),
 ) -> None:
     t0 = time.perf_counter()
     df = read_parquet_glob(glob)
@@ -367,4 +391,3 @@ def bench(
 
 if __name__ == "__main__":
     app()
-

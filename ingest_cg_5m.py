@@ -105,7 +105,7 @@ def ingest_coinglass(
     source: str = typer.Argument("coinglass"),
     symbol: str = typer.Option("BTCUSDT", "--symbol"),
     tf: str = typer.Option("5m", "--tf"),
-    days: int = typer.Option(180, "--days"),
+    days: int = typer.Option(80, "--days"),
     out: str = typer.Option("data/parquet/5m/BTCUSDT", "--out"),
     exchange: Optional[str] = typer.Option("BINANCE", "--exchange"),
     base_url: str = typer.Option(DEFAULT_BASE_URL, "--base-url"),
@@ -224,4 +224,3 @@ def ingest_coinglass(
 
 if __name__ == "__main__":
     app()
-

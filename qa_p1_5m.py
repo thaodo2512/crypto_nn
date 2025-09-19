@@ -23,7 +23,7 @@ def read_parquet_glob(glob: str) -> pd.DataFrame:
     return df
 
 
-def evaluate_qa(df: pd.DataFrame, horizon_days: int = 180) -> Tuple[Dict, bool]:
+def evaluate_qa(df: pd.DataFrame, horizon_days: int = 80) -> Tuple[Dict, bool]:
     ts_end = pd.to_datetime(df["ts"].max(), utc=True)
     ts_start = ts_end - pd.Timedelta(days=horizon_days)
     expected_idx = pd.date_range(ts_start, ts_end, freq="5min")
@@ -71,7 +71,7 @@ def evaluate_qa(df: pd.DataFrame, horizon_days: int = 180) -> Tuple[Dict, bool]:
         }
 
     report = {
-        "expected_bars_180d": 180 * 24 * 12,
+        "expected_bars_80d": horizon_days * 24 * 12,
         "present_bars": present_bars,
         "gap_ratio": gap_ratio,
         "dup_key_count": dup_key_count,
@@ -89,7 +89,8 @@ def evaluate_qa(df: pd.DataFrame, horizon_days: int = 180) -> Tuple[Dict, bool]:
 @app.command("qa")
 def qa(
     glob: str = typer.Option(..., "--glob"),
-    out: str = typer.Option("reports/p1_qa_core_5m.json", "--out"),
+    out: str = typer.Option("reports/p1_qa_core_5m_80d.json", "--out"),
+    horizon_days: int = typer.Option(80, "--days", help="Horizon (days) for QA window; default 80"),
 ) -> None:
     df = read_parquet_glob(glob)
     if df.empty:
@@ -98,7 +99,7 @@ def qa(
         with open(out, "w") as f:
             json.dump({"error": "no_data"}, f, indent=2)
         raise typer.Exit(code=1)
-    report, fail = evaluate_qa(df)
+    report, fail = evaluate_qa(df, horizon_days=horizon_days)
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
         json.dump(report, f, indent=2)
@@ -110,4 +111,3 @@ def qa(
 
 if __name__ == "__main__":
     app()
-
