@@ -10,6 +10,7 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - QA 5m: `docker compose run --rm qa_5m`
   - DuckDB view 5m: `docker compose run --rm duckdb_view_5m`
   - Labels P3: `make p3_label`
+  - Sampling P4: `make p4_sampling` (rebuild image first)
 
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
@@ -50,12 +51,29 @@ Causal Transforms
 - Winsorize causal (1–99%) and z-score causal on 30d past window.
 - Only funding_now and oi_now may ffill≤3 bars (flags emitted).
 
+## Phase P4 – Sampling (IF gate + SMOTE, 5m)
+- Overview
+  - Isolation Forest gate on a 30‑day rolling window (q=0.995) selects “anomalous” timestamps → mask at `data/masks/ifgate_5m.parquet`.
+  - SMOTE applies ONLY to TRAIN folds on LONG/SHORT windows (W=144 bars), never on WAIT or OOS/VAL.
+  - Purged walk‑forward CV with 1‑day embargo between TRAIN and VAL/OOS.
+  - Acceptance: WAIT share in TRAIN ≤ 60% for every fold; OOS untouched.
+- Docker (Makefile): `make p4_sampling`
+- Local commands
+  - IF gate: `python cli_p4.py iforest-train --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out data/masks/ifgate_5m.parquet --q 0.995 --rolling-days 30 --seed 42`
+  - SMOTE windows: `python cli_p4.py smote-windows --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --mask data/masks/ifgate_5m.parquet --W 144 --out data/aug/train_smote --seed 42`
+  - Report: `python cli_p4.py report-classmix --pre data/train/ --post data/aug/train_smote/ --out reports/p4_classmix.json`
+- Outputs
+  - Mask: `data/masks/ifgate_5m.parquet` (ts, symbol, keep, fold_id)
+  - Augmented: `data/aug/train_smote/<fold>/train.parquet`
+  - Report: `reports/p4_classmix.json`; Logs: `logs/p4_sampling.log`
+- Note: Rebuild Docker image after adding P4 deps (`scikit-learn`, `imbalanced-learn`): `docker compose build`.
+
 ## Incremental Ingestion
 - Skips days that already have `_SUCCESS` and `MANIFEST.tsv` markers.
 - Always refreshes the last N days (default `--refresh-tail 2`) to capture late data.
 - Force full reload: add `--force --no-skip-present`.
 - Debug requests/responses: use the `ingest_debug` service or add `--debug`.
- - Verbose logs: 5m ingester prints progress by default; add `--no-verbose` to silence.
+- Verbose logs: 5m ingester prints progress by default; add `--no-verbose` to silence.
 
 Examples
 - Refresh recent days only (defaults): `docker compose run --rm ingest`
