@@ -43,3 +43,35 @@ services:
       "--view", "bars_15m",
       "--db", "meta/duckdb/p1.duckdb"
     ]
+
+  # P2 – 5m feature builder
+  features_build:
+    <<: *app
+    command: [
+      "python", "features_p2.py", "build",
+      "--glob", "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--out", "data/features/5m/BTCUSDT",
+      "--warmup", "8640", "--winsor_low", "0.01", "--winsor_high", "0.99"
+    ]
+  features_validate:
+    <<: *app
+    command: [
+      "python", "features_p2.py", "validate",
+      "--glob", "data/features/5m/BTCUSDT/**/*.parquet",
+      "--qa", "reports/p2_qa.json"
+    ]
+  features_bench:
+    <<: *app
+    command: [
+      "python", "features_p2.py", "bench",
+      "--glob", "data/features/5m/BTCUSDT/**/*.parquet",
+      "--report", "reports/p2_bench.csv"
+    ]
+  duck_view_feat:
+    <<: *app
+    command: [
+      "python", "duck_view.py", "create-view",
+      "--glob", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--view", "feat_5m",
+      "--db", "meta/duckdb/p1.duckdb"
+    ]

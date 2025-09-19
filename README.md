@@ -10,6 +10,36 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 15‑minut
   - QA: `docker compose run --rm qa`
 - DuckDB view: `docker compose run --rm duckdb_view`
 
+## Phase P2 – 5m Feature Builder
+- Build features (from P1 5m bars):
+  - Docker: `docker compose run --rm features_build`
+  - Local: `python features_p2.py build --glob "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out "data/features/5m/BTCUSDT" --warmup 8640 --winsor_low 0.01 --winsor_high 0.99`
+- Validate acceptance (gaps≤0.5%, impute≤5%, no NaN):
+  - Docker: `docker compose run --rm features_validate`
+  - Local: `python features_p2.py validate --glob "data/features/5m/BTCUSDT/**/*.parquet" --qa reports/p2_qa.json`
+- Benchmark (< 50 ms/bar):
+  - Docker: `docker compose run --rm features_bench`
+  - Local: `python features_p2.py bench --glob "data/features/5m/BTCUSDT/**/*.parquet" --report reports/p2_bench.csv`
+- DuckDB view over features:
+  - Docker: `docker compose run --rm duck_view_feat`
+  - Local: `python duck_view.py create-view --glob "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --view feat_5m --db meta/duckdb/p1.duckdb`
+
+Inputs/Outputs
+- Input (P1): `data/parquet/5m/BTCUSDT/y=YYYY/m=MM/d=DD/part-*.parquet` with keys `[symbol, ts]`, UTC, 5m.
+- Output (P2): `data/features/5m/BTCUSDT/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet`, ZSTD(3), dictionary on, one file/day, MANIFEST.tsv + `_SUCCESS`.
+
+Feature Columns (no NaN)
+- ret_5m, ret_1h, ret_4h, hl_range, co_ret
+- vol_z, oi_z, fund_now_z, funding_pctile_30d
+- cvd_diff_z, perp_share_60m, liq60_z, rv_5m_z
+- hour_of_week_sin, hour_of_week_cos
+- _imputed_funding_now, _imputed_oi_now
+
+Causal Transforms
+- Warmup: 30 days (8640 bars) per symbol (drop before warmup).
+- Winsorize causal (1–99%) and z-score causal on 30d past window.
+- Only funding_now and oi_now may ffill≤3 bars (flags emitted).
+
 ## Incremental Ingestion
 - Skips days that already have `_SUCCESS` and `MANIFEST.tsv` markers.
 - Always refreshes the last N days (default `--refresh-tail 2`) to capture late data.
