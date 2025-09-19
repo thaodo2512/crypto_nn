@@ -24,7 +24,7 @@ services:
   qa_5m:
     <<: *app
     command: [
-      "python", "qa_p1_5m.py", "qa",
+      "python", "qa_p1_5m.py",
       "--glob", "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
       "--out", "reports/p1_qa_core_5m_80d.json",
       "--days", "80"

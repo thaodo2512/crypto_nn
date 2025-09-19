@@ -9,6 +9,7 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Ingest 5m: `docker compose run --rm ingest_5m`
   - QA 5m: `docker compose run --rm qa_5m`
   - DuckDB view 5m: `docker compose run --rm duckdb_view_5m`
+  - Labels P3: `make p3_label`
 
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
@@ -23,6 +24,15 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
 - DuckDB view over features:
   - Docker: `docker compose run --rm duck_view_feat`
   - Local: `python duck_view.py create-view --glob "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --view feat_5m --db meta/duckdb/p1.duckdb`
+
+## Phase P3 – Triple-Barrier Labels (5m)
+- Build labels:
+  - Docker (Makefile): `make p3_label`
+  - Local: `python label_p3.py triple-barrier --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out "data/labels/5m/BTCUSDT" --tf 5m --k 1.2 --H 36 --atr_window 14`
+- Validate labels:
+  - Local: `python label_p3.py validate --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --report reports/p3_qa_5m_80d.json`
+- Sample:
+  - Local: `python label_p3.py sample --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --n 10`
 
 Inputs/Outputs
 - Input (P1): `data/parquet/5m/BTCUSDT/y=YYYY/m=MM/d=DD/part-*.parquet` with keys `[symbol, ts]`, UTC, 5m.
@@ -45,6 +55,7 @@ Causal Transforms
 - Always refreshes the last N days (default `--refresh-tail 2`) to capture late data.
 - Force full reload: add `--force --no-skip-present`.
 - Debug requests/responses: use the `ingest_debug` service or add `--debug`.
+ - Verbose logs: 5m ingester prints progress by default; add `--no-verbose` to silence.
 
 Examples
 - Refresh recent days only (defaults): `docker compose run --rm ingest`
@@ -56,7 +67,7 @@ Examples
 - Auth: export `COINGLASS_API_KEY`
 - P1 (5m, 80d):
   - Ingest: `python ingest_cg_5m.py --symbol BTCUSDT --tf 5m --days 80 --out data/parquet/5m/BTCUSDT`
-  - QA: `python qa_p1_5m.py qa --glob "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out reports/p1_qa_core_5m_80d.json --days 80`
+  - QA: `python qa_p1_5m.py --glob "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out reports/p1_qa_core_5m_80d.json --days 80`
   - DuckDB view: `python duckview.py create --db meta/duckdb/p1.duckdb --glob "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --view bars_5m`
   
 Legacy 15m (optional):
