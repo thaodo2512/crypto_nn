@@ -326,10 +326,13 @@ def resample_15m_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
         "volume_usd": "sum",
     }
     out = (
-        df.resample("15min", closed="right", label="right")
+        df.resample("15min", closed="right", label="right", origin="start_day", offset="15min")
         .agg(agg)
         .dropna(subset=["open", "high", "low", "close"], how="any")
     )
+    # Drop initial anchor at start-of-day if it equals the dataset's day boundary
+    first_day = df.index.min().floor("D")
+    out = out[out.index > first_day]
     out = out.reset_index()
     return out
 
@@ -341,7 +344,9 @@ def resample_15m_sum(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     tmp = df.copy()
     tmp["ts"] = pd.to_datetime(tmp["ts"], utc=True)
     tmp = tmp.set_index("ts").sort_index()
-    out = tmp[cols].resample("15min", closed="right", label="right").sum()
+    out = tmp[cols].resample("15min", closed="right", label="right", origin="start_day", offset="15min").sum()
+    first_day = tmp.index.min().floor("D")
+    out = out[out.index > first_day]
     return out.reset_index()
 
 
@@ -360,10 +365,12 @@ def resample_5m_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
         "volume_usd": "sum",
     }
     out = (
-        df.resample("5min", closed="right", label="right")
+        df.resample("5min", closed="right", label="right", origin="start_day", offset="5min")
         .agg(agg)
         .dropna(subset=["open", "high", "low", "close"], how="any")
     )
+    first_day = df.index.min().floor("D")
+    out = out[out.index > first_day]
     out = out.reset_index()
     return out
 
@@ -375,7 +382,9 @@ def resample_5m_sum(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     tmp = df.copy()
     tmp["ts"] = pd.to_datetime(tmp["ts"], utc=True)
     tmp = tmp.set_index("ts").sort_index()
-    out = tmp[cols].resample("5min", closed="right", label="right").sum()
+    out = tmp[cols].resample("5min", closed="right", label="right", origin="start_day", offset="5min").sum()
+    first_day = tmp.index.min().floor("D")
+    out = out[out.index > first_day]
     return out.reset_index()
 
 
@@ -386,7 +395,7 @@ def reindex_5m_ffill_limit(df: pd.DataFrame, col: str, limit: int = 3) -> pd.Dat
     tmp = df.copy()
     tmp["ts"] = pd.to_datetime(tmp["ts"], utc=True)
     tmp = tmp.set_index("ts").sort_index()
-    full = tmp[[col]].resample("5min", closed="right", label="right").asfreq()
+    full = tmp[[col]].resample("5min", closed="right", label="right", origin="start_day", offset="5min").asfreq()
     ffilled = full.ffill(limit=limit)
     imputed = ffilled[col].notna() & full[col].isna()
     out = ffilled.reset_index()

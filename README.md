@@ -1,6 +1,6 @@
-# CoinGlass 15m BTCUSDT Pipeline
+# CoinGlass BTCUSDT Pipeline (5m default)
 
-Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 15‑minute BTCUSDT Parquet with QA and DuckDB helpers.
+Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute BTCUSDT Parquet with QA and DuckDB helpers.
 
 ## Quick Start (5m default)
 - Docker Compose (recommended)
@@ -16,10 +16,10 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 15‑minut
   - Local: `python features_p2.py build --glob "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out "data/features/5m/BTCUSDT" --warmup 8640 --winsor_low 0.01 --winsor_high 0.99`
 - Validate acceptance (gaps≤0.5%, impute≤5%, no NaN):
   - Docker: `docker compose run --rm features_validate`
-  - Local: `python features_p2.py validate --glob "data/features/5m/BTCUSDT/**/*.parquet" --qa reports/p2_qa.json`
+  - Local: `python features_p2.py validate --glob "data/features/5m/BTCUSDT/**/*.parquet" --qa reports/p2_qa_5m_80d.json --schema reports/p2_feature_schema.json --horizon_days 80 --warmup 8640`
 - Benchmark (< 50 ms/bar):
   - Docker: `docker compose run --rm features_bench`
-  - Local: `python features_p2.py bench --glob "data/features/5m/BTCUSDT/**/*.parquet" --report reports/p2_bench.csv`
+  - Local: `python features_p2.py bench --glob "data/features/5m/BTCUSDT/**/*.parquet" --report reports/p2_bench_5m_80d.csv`
 - DuckDB view over features:
   - Docker: `docker compose run --rm duck_view_feat`
   - Local: `python duck_view.py create-view --glob "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --view feat_5m --db meta/duckdb/p1.duckdb`
@@ -54,6 +54,12 @@ Examples
 ## Local (optional)
 - Install: `pip install -r requirements.txt -r requirements-dev.txt`
 - Auth: export `COINGLASS_API_KEY`
+- P1 (5m, 80d):
+  - Ingest: `python ingest_cg_5m.py --symbol BTCUSDT --tf 5m --days 80 --out data/parquet/5m/BTCUSDT`
+  - QA: `python qa_p1_5m.py qa --glob "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out reports/p1_qa_core_5m_80d.json --days 80`
+  - DuckDB view: `python duckview.py create --db meta/duckdb/p1.duckdb --glob "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --view bars_5m`
+  
+Legacy 15m (optional):
 - Ingest: `python ingest_cg.py ingest coinglass --conf conf/p1_inputs_cg.yaml`
 - QA: `python qa_p1.py qa --glob "data/parquet/15m/BTCUSDT/**/*.parquet" --out reports/p1_qa_core.json`
 - DuckDB view: `python qa_p1.py duckdb-view --glob "data/parquet/15m/BTCUSDT/**/*.parquet" --view bars_15m`
@@ -76,17 +82,14 @@ out_dir: data/parquet/15m/BTCUSDT
 - Aggregated taker (spot/perp): `spot/aggregated-taker-buy-sell-volume/history`, `futures/aggregated-taker-buy-sell-volume/history`
 - Liquidations (coin aggregated): `futures/liquidation/heatmap/coin/model1`
 
-## Features & Storage
-- Features: rv_15m, cvd_perp_15m, perp_share_60m, oi_pctile_30d, funding_pctile_30d.
-- Funding reindexed to 15m with ffill ≤3 bars, flag: `funding_now_imputed`.
-- Lake layout: `data/parquet/15m/{symbol}/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet` (one file/day, UTC, right-closed bars).
-- Parquet format: ZSTD(3), dictionary on; keys `[symbol, ts]`. Partitions: `y/m/d`.
-- Integrity per day: writes `MANIFEST.tsv` with sha256 and a `_SUCCESS` marker; re-writes by whole day for late data.
- - Incremental: detects already‑ingested days via markers and only re‑fetches missing or tail days.
+## Storage & Integrity
+- P1 5m lake: `data/parquet/5m/{symbol}/y=YYYY/m=MM/d=DD/part-YYYYMMDD.parquet` (UTC, right‑closed 5m).
+- ZSTD(3), dictionary on; keys `[symbol, ts]`; partitions `y/m/d`.
+- Per day integrity: `MANIFEST.tsv` (sha256) and `_SUCCESS` marker; whole‑day rewrite semantics; incremental ingest supported.
 
 ## QA
-- Reports last 180d: expected vs present bars, missing per column, imputation ratios (funding/OI), duplicates, NaN counts for derived features.
-- Gates (configurable via `qa_targets`): gaps < 0.5%, impute < 5% per feature, no NaN after transforms.
+- P1 5m 80d acceptance: expected_bars_80d=23040, gap_ratio<0.5%, NaN=0, imputed≤5% (funding/oi only).
+- P2 5m acceptance: usable last 50d, ms_per_bar≤50, NaN=0, imputed≤5%.
 
 ## Testing
 - Run: `pytest -q`

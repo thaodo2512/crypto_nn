@@ -158,7 +158,11 @@ def build_features(
         # Returns
         close = g["close"].astype(float)
         open_ = g["open"].astype(float)
-        ret_5m = np.log(np.where((close > 0) & (close.shift(1) > 0), close / close.shift(1), 1.0))
+        ret_5m = pd.Series(
+            np.log(np.where((close > 0) & (close.shift(1) > 0), close / close.shift(1), 1.0)),
+            index=g.index,
+            dtype=float,
+        )
         ret_1h = ret_5m.rolling(12, min_periods=1).sum()
         ret_4h = ret_5m.rolling(48, min_periods=1).sum()
 
