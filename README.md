@@ -3,8 +3,16 @@
 Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 15‑minute BTCUSDT Parquet with QA and DuckDB helpers.
 
 ## Quick Start
-- Install: `pip install -e .[dev]`
-- Auth: set `COINGLASS_API_KEY` in your environment.
+- Docker Compose (recommended)
+  - Build: `docker compose build`
+  - Set key: copy `secrets/.env.example` to `secrets/.env` and fill `COINGLASS_API_KEY`
+  - Ingest: `docker compose run --rm ingest`
+  - QA: `docker compose run --rm qa`
+  - DuckDB view: `docker compose run --rm duckdb_view`
+
+## Local (optional)
+- Install: `pip install -r requirements.txt -r requirements-dev.txt`
+- Auth: export `COINGLASS_API_KEY`
 - Ingest: `python ingest_cg.py ingest coinglass --conf conf/p1_inputs_cg.yaml`
 - QA: `python qa_p1.py qa --glob "data/parquet/15m/BTCUSDT/**/*.parquet" --out reports/p1_qa_core.json`
 - DuckDB view: `python qa_p1.py duckdb-view --glob "data/parquet/15m/BTCUSDT/**/*.parquet" --view bars_15m`

@@ -1,0 +1,38 @@
+version: "3.9"
+
+x-app: &app
+  build: .
+  working_dir: /app
+  env_file:
+    - secrets/.env
+  environment:
+    - PYTHONUNBUFFERED=1
+  volumes:
+    - ./:/app
+    - ./data:/app/data
+    - ./reports:/app/reports
+
+services:
+  ingest:
+    <<: *app
+    command: [
+      "python", "ingest_cg.py", "ingest", "coinglass",
+      "--conf", "conf/p1_inputs_cg.yaml"
+    ]
+
+  qa:
+    <<: *app
+    command: [
+      "python", "qa_p1.py", "qa",
+      "--glob", "data/parquet/15m/BTCUSDT/**/*.parquet",
+      "--out", "reports/p1_qa_core.json"
+    ]
+
+  duckdb_view:
+    <<: *app
+    command: [
+      "python", "qa_p1.py", "duckdb-view",
+      "--glob", "data/parquet/15m/BTCUSDT/**/*.parquet",
+      "--view", "bars_15m"
+    ]
+
