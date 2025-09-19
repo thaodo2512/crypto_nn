@@ -345,6 +345,55 @@ def resample_15m_sum(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     return out.reset_index()
 
 
+def resample_5m_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """Resample OHLCV to 5m with right-closed, right label."""
+    if df.empty:
+        return df
+    df = df.copy()
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    df = df.set_index("ts").sort_index()
+    agg = {
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume_usd": "sum",
+    }
+    out = (
+        df.resample("5min", closed="right", label="right")
+        .agg(agg)
+        .dropna(subset=["open", "high", "low", "close"], how="any")
+    )
+    out = out.reset_index()
+    return out
+
+
+def resample_5m_sum(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+    """Resample selected columns by summation to 5m."""
+    if df.empty:
+        return pd.DataFrame(columns=["ts", *cols])
+    tmp = df.copy()
+    tmp["ts"] = pd.to_datetime(tmp["ts"], utc=True)
+    tmp = tmp.set_index("ts").sort_index()
+    out = tmp[cols].resample("5min", closed="right", label="right").sum()
+    return out.reset_index()
+
+
+def reindex_5m_ffill_limit(df: pd.DataFrame, col: str, limit: int = 3) -> pd.DataFrame:
+    """Reindex to 5m and forward-fill with a max bar limit. Adds boolean `<col>_imputed`."""
+    if df.empty:
+        return pd.DataFrame(columns=["ts", col, f"{col}_imputed"])  # typed columns
+    tmp = df.copy()
+    tmp["ts"] = pd.to_datetime(tmp["ts"], utc=True)
+    tmp = tmp.set_index("ts").sort_index()
+    full = tmp[[col]].resample("5min", closed="right", label="right").asfreq()
+    ffilled = full.ffill(limit=limit)
+    imputed = ffilled[col].notna() & full[col].isna()
+    out = ffilled.reset_index()
+    out[f"{col}_imputed"] = imputed.reset_index(drop=True)
+    return out
+
+
 def reindex_15m_ffill_limit(df: pd.DataFrame, col: str, limit: int = 3) -> pd.DataFrame:
     """Reindex to 15m and forward-fill with a max bar limit. Adds boolean `<col>_imputed`."""
     if df.empty:
