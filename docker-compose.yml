@@ -105,3 +105,33 @@ services:
       "--view", "feat_5m",
       "--db", "meta/duckdb/p1.duckdb"
     ]
+
+  # P6 – Calibration, Ensemble, Threshold Tuning
+  p6_calibrate:
+    <<: *app
+    command: [
+      "python", "cli_p5.py", "calibrate",
+      "--probs", "artifacts/p5_oos_probs/*.parquet",
+      "--method", "temperature",
+      "--out", "models/calib.json"
+    ]
+  p6_ensemble:
+    <<: *app
+    command: [
+      "python", "cli_p5.py", "ensemble",
+      "--calib", "models/calib.json",
+      "--probs", "artifacts/p5_oos_probs/*.parquet",
+      "--weight-by", "EV",
+      "--out", "models/ensemble_5m.json",
+      "--cost_bps", "5"
+    ]
+  p6_tune_threshold:
+    <<: *app
+    command: [
+      "python", "cli_p5.py", "tune-threshold",
+      "--ensemble", "models/ensemble_5m.json",
+      "--probs", "artifacts/p5_oos_probs/*.parquet",
+      "--grid", "0.50:0.80:0.025",
+      "--cost", "bps:5",
+      "--out", "reports/p6_oos_summary.json"
+    ]
