@@ -156,7 +156,8 @@ out_dir: data/parquet/15m/BTCUSDT
 - P1 15m (legacy): view `bars_15m` over 15m lake via `docker compose run --rm duckdb_view`.
 
 ## Phase P5 – Small NN Training (GRU)
-- Command: `python cli_p5.py train --model gru --window 144 --cv walkforward --embargo 1D \
+- Docker: `docker compose run --rm p5_train`
+- Local: `python cli_p5.py train --model gru --window 144 --cv walkforward --embargo 1D \
   --features "data/features/5m/BTCUSDT/**/part-*.parquet" --labels "data/labels/5m/BTCUSDT/**/part-*.parquet" \
   --out models/gru_5m --seed 42`
 - Model: GRU(64,1), dropout=0.2, weight_decay=1e-4; loss: weighted CE with time-decay (≈0.98/day).

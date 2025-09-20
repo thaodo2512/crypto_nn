@@ -238,3 +238,19 @@ services:
       "--window", "144",
       "--sample", "16"
     ]
+
+  # P5 – Small NN training (GRU)
+  p5_train:
+    <<: *app
+    command: [
+      "python", "cli_p5.py", "train",
+      "--model", "gru",
+      "--window", "144",
+      "--cv", "walkforward",
+      "--embargo", "1D",
+      "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--labels", "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--out", "models/gru_5m",
+      "--seed", "42",
+      "--folds", "5"
+    ]
