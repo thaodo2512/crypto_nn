@@ -89,30 +89,30 @@ train_all:
 
 p1:
 	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest
-	python scripts/validators/p1_gate.py
+	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p1_gate.py
 
 p2:
 	docker compose -f docker-compose.train.yml --profile train run --rm p2_features
-	python scripts/validators/p2_gate.py
+	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p2_gate.py
 
 p3:
 	docker compose -f docker-compose.train.yml --profile train run --rm p3_label
-	python scripts/validators/p3_gate.py
+	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p3_gate.py
 
 p4:
 	docker compose -f docker-compose.train.yml --profile train run --rm p4_sampling || true
-	python scripts/validators/p4_gate.py
+	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p4_gate.py
 
 p5:
 	docker compose -f docker-compose.train.yml --profile train run --rm p5_train
-	python scripts/validators/p5_gate.py
+	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p5_gate.py
 
 p6:
 	docker compose -f docker-compose.train.yml --profile train run --rm p6_calibrate
 	docker compose -f docker-compose.train.yml --profile train run --rm p6_ensemble
 	docker compose -f docker-compose.train.yml --profile train run --rm p6_thresholds
-	python scripts/validators/p6_gate.py
+	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p6_gate.py
 
 p8:
 	docker compose -f docker-compose.train.yml --profile train run --rm p8_export
-	python scripts/validators/p8_gate.py
+	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p8_gate.py

@@ -24,7 +24,8 @@ run_service() {
 gate() {
   local phase="$1"; shift || true
   log "Validating gate: ${phase}"
-  python "scripts/validators/${phase}_gate.py"
+  docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest \
+    python "scripts/validators/${phase}_gate.py"
 }
 
 mkdir -p logs reports artifacts export
