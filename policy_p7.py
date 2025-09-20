@@ -154,3 +154,19 @@ def decide(
 
 if __name__ == "__main__":
     app()
+
+@app.callback(invoke_without_command=True)
+def _default(
+    ctx: typer.Context,
+    probs: str = typer.Option(None, "--probs"),
+    atr: str = typer.Option(None, "--atr"),
+    k_range_min: float = typer.Option(1.0, "--k-range-min"),
+    k_range_max: float = typer.Option(1.5, "--k-range-max"),
+    H: int = typer.Option(36, "--H"),
+    out: str = typer.Option("decisions", "--out"),
+) -> None:
+    """Allow running without explicit subcommand by forwarding to decide()."""
+    if ctx.invoked_subcommand is None:
+        if not probs or not atr:
+            raise typer.BadParameter("Missing required options --probs/--atr; use --help for usage.")
+        decide.callback(probs=probs, atr=atr, k_range_min=k_range_min, k_range_max=k_range_max, H=H, out=out)  # type: ignore

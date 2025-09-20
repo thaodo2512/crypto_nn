@@ -227,7 +227,7 @@ services:
   p7_decide:
     <<: *app
     command: [
-      "python", "policy_p7.py", "decide",
+      "python", "policy_p7.py",
       "--probs", "artifacts/p6_calibrated.parquet",
       "--atr", "data/atr_5m.parquet",
       "--k-range-min", "1.0",
