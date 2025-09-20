@@ -54,16 +54,18 @@ def build_walkforward(
 
     # Evenly place OOS windows within eligible band
     oos_len = int(min_oos)
-    oos_starts = np.linspace(i0 + val_bars + embargo, i1 - oos_len + 1, n_folds).astype(int)
+    # Ensure embargo between TRAIN and VAL, and between VAL and OOS → need two embargo gaps
+    lower = i0 + val_bars + 2 * embargo + 1
+    oos_starts = np.linspace(lower, i1 - oos_len + 1, n_folds).astype(int)
     folds: List[Fold] = []
     for k, s in enumerate(oos_starts):
         oos_start = int(s)
         oos_end = int(s + oos_len - 1)
-        # Train ends embargo bars before OOS
-        train_end = max(oos_start - embargo - 1, i0)
-        # Val is the tail of train of fixed length
-        val_end = train_end
+        # Place validation immediately before OOS with an embargo gap
+        val_end = max(oos_start - embargo - 1, i0)
         val_start = max(val_end - val_bars + 1, i0)
+        # Training ends embargo bars before validation
+        train_end = max(val_start - embargo - 1, i0)
         # Build spans as ISO strings
         train_span = [[ts[i0].isoformat(), ts[train_end].isoformat()]] if train_end >= i0 else []
         val_span = [[ts[val_start].isoformat(), ts[val_end].isoformat()]] if val_end >= val_start else []
@@ -112,4 +114,3 @@ def emit_folds_json(
     with open(outp, "w") as f:
         json.dump(payload, f, indent=2)
     return outp
-

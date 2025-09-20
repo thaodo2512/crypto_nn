@@ -42,3 +42,39 @@ def test_dynamic_k_mapping():
     k_hi = _dynamic_k(1.0, 1.0, 1.5)
     assert 1.0 <= k_low < k_mid < k_hi <= 1.5
 
+
+def test_early_exit_after_3_bars(tmp_path):
+    # Craft a LONG entry followed by 3 bars with no follow-through (flat/down)
+    import pyarrow as pa, pyarrow.parquet as pq
+    idx = pd.date_range("2024-01-01", periods=5, freq="5min", tz="UTC")
+    # Probs: strong LONG at first bar, then zeros
+    probs = pd.DataFrame({
+        "ts": idx,
+        "p_0": [0.0, 1.0, 1.0, 1.0, 1.0],
+        "p_1": [0.9, 0.0, 0.0, 0.0, 0.0],
+        "p_2": [0.1, 0.0, 0.0, 0.0, 0.0],
+    })
+    # ATR: fixed atr_pct; close decreases slightly over next bars
+    atr = pd.DataFrame({
+        "ts": idx,
+        "close": [100.0, 99.9, 99.8, 99.7, 99.6],
+        "atr_pct": [0.01] * 5,
+        "vol_pctile": [0.5] * 5,
+    })
+    pfile = tmp_path / "probs.parquet"
+    afile = tmp_path / "atr.parquet"
+    pq.write_table(pa.Table.from_pandas(probs, preserve_index=False), pfile)
+    pq.write_table(pa.Table.from_pandas(atr, preserve_index=False), afile)
+    out = tmp_path / "dec"
+    r = CliRunner().invoke(decide, [
+        "--probs", str(pfile), "--atr", str(afile), "--k-range-min", "1.0", "--k-range-max", "1.5", "--H", "36", "--out", str(out)
+    ])
+    assert r.exit_code == 0, r.output
+    import duckdb
+    con = duckdb.connect()
+    try:
+        df = con.execute(f"select * from read_parquet('{str(out)}/**/*.parquet') order by ts").df()
+    finally:
+        con.close()
+    # At ts[3] (3 bars after entry) we expect early_exit
+    assert df.iloc[3]["reason"] in ("early_exit", "cooldown")

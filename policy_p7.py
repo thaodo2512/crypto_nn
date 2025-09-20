@@ -98,6 +98,13 @@ def decide(
     dt = pd.Timedelta(minutes=5)
     cooldown = H * dt
     last_entry_ts: pd.Timestamp | None = None
+    entry_side: str | None = None
+    entry_close: float = np.nan
+    entry_tp_px: float = np.nan
+    max_close_since_entry: float = -np.inf
+    min_close_since_entry: float = np.inf
+    early_exit_marked: bool = False
+    follow_frac = 0.10  # require at least 10% of TP distance within 3 bars
     rows = []
     cm = CostModel(bps=5.0)
     for _, r in df.iterrows():
@@ -106,9 +113,25 @@ def decide(
         if not np.isfinite(close):
             rows.append({"ts": ts, "side": "WAIT", "size": 0.0, "TP_px": np.nan, "SL_px": np.nan, "EV": 0.0, "reason": "no_close"})
             continue
-        # Cooldown (no re-entry within H)
+        # Cooldown (no re-entry within H); track early-exit at 3 bars if no follow-through
         if last_entry_ts is not None and (ts - last_entry_ts) < cooldown:
-            rows.append({"ts": ts, "side": "WAIT", "size": 0.0, "TP_px": np.nan, "SL_px": np.nan, "EV": 0.0, "reason": "cooldown"})
+            # update follow-through stats for first 3 bars
+            bars_elapsed = int(((ts - last_entry_ts) / dt) + 1e-9)
+            reason = "cooldown"
+            if 1 <= bars_elapsed <= 3 and np.isfinite(close):
+                max_close_since_entry = max(max_close_since_entry, close)
+                min_close_since_entry = min(min_close_since_entry, close)
+            if bars_elapsed == 3 and not early_exit_marked and entry_side is not None:
+                if entry_side == "LONG":
+                    dist = entry_tp_px - entry_close
+                    moved = max(0.0, max_close_since_entry - entry_close)
+                else:
+                    dist = entry_close - entry_tp_px
+                    moved = max(0.0, entry_close - min_close_since_entry)
+                if dist > 0 and moved < follow_frac * dist:
+                    reason = "early_exit"
+                early_exit_marked = True
+            rows.append({"ts": ts, "side": "WAIT", "size": 0.0, "TP_px": np.nan, "SL_px": np.nan, "EV": 0.0, "reason": reason})
             continue
         side, size, tp_px, sl_px, ev, reason = _ev_decision_row(
             float(r["p_1"]), float(r["p_2"]), close, float(r["atr_pct"]), k_range_min, k_range_max, float(r.get("vol_pctile", 0.5)), cm
@@ -116,6 +139,12 @@ def decide(
         rows.append({"ts": ts, "side": side, "size": size, "TP_px": tp_px, "SL_px": sl_px, "EV": ev, "reason": reason})
         if side != "WAIT":
             last_entry_ts = ts
+            entry_side = side
+            entry_close = close
+            entry_tp_px = tp_px
+            max_close_since_entry = close
+            min_close_since_entry = close
+            early_exit_marked = False
     dec = pd.DataFrame(rows)
     # Persist partitioned by day
     dec["symbol"] = df.get("symbol", pd.Series(["BTCUSDT"] * len(dec)))
@@ -125,4 +154,3 @@ def decide(
 
 if __name__ == "__main__":
     app()
-
