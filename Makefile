@@ -38,3 +38,42 @@ p5_train:
 	  --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
 	  --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
 	  --out "models/gru_5m" --seed 42 --folds 5
+
+# --- Docker (PC / Jetson) ---
+.PHONY: build-pc up-pc down-pc build-jetson up-jetson down-jetson package-model package-data deploy-model deploy-data jetson-health jetson-logs
+
+build-pc:
+	docker compose -f docker-compose.pc.yml build
+
+up-pc:
+	docker compose -f docker-compose.pc.yml up -d
+
+down-pc:
+	docker compose -f docker-compose.pc.yml down -v --remove-orphans
+
+build-jetson:
+	docker compose -f docker-compose.jetson.yml build
+
+up-jetson:
+	docker compose -f docker-compose.jetson.yml up -d
+
+down-jetson:
+	docker compose -f docker-compose.jetson.yml down -v --remove-orphans
+
+package-model:
+	bash scripts/pack_model.sh
+
+package-data:
+	bash scripts/pack_data.sh data/features/5m/BTCUSDT
+
+deploy-model:
+	bash scripts/push_ssh.sh --bundle "$(MODEL_BUNDLE)" --target models
+
+deploy-data:
+	bash scripts/push_ssh.sh --bundle "$(DATA_BUNDLE)" --target data
+
+jetson-health:
+	bash scripts/healthcheck.sh
+
+jetson-logs:
+	ssh -i "$(JETSON_SSH_KEY)" -o StrictHostKeyChecking=no "$(JETSON_USER)@$(JETSON_HOST)" 'sudo journalctl -u app --no-pager -n 200'

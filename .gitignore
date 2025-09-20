@@ -18,3 +18,12 @@ data/**
 reports/**
 !reports/.gitkeep
 
+# Runtime artifacts and models
+artifacts/**
+!artifacts/.gitkeep
+models/**
+!models/.gitkeep
+logs/**
+!logs/.gitkeep
+export/**
+!export/.gitkeep

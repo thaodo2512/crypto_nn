@@ -20,7 +20,8 @@
 - P3 (labels): `docker compose run --rm labels_build` then `labels_validate` or `p3_validate`.
 - P4 (sampling): `docker compose run --rm p4_iforest | p4_smote | p4_classmix` (or `p4_pipeline`).
 - P5 (train): `docker compose run --rm p5_train` (writes models under `models/gru_5m`).
-- P5 (train): `make p5_train` (GRU, weighted CE, time-decay).
+- P5 (OOS export): `docker compose run --rm p5_oos_export` (writes `artifacts/p5_oos_probs/fold*.parquet`).
+- P5 (validate): `docker compose run --rm p5_validate` (checks ckpts, OOS probs, CV integrity, window shape, loss/time-decay hints).
 - P6 (calibrate/ensemble/tune τ): `p6_calibrate`, `p6_ensemble`, `p6_tune_threshold` compose services.
 - P7 (policy): `python policy_p7.py decide --probs ... --atr ... --out decisions/`.
 - P8 (export ONNX FP16): `docker compose run --rm p8_export`.
