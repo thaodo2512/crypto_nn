@@ -234,6 +234,15 @@ def train(
     logger.setLevel(logging.INFO)
 
     _set_seed(seed)
+    # Use all CPU threads when not using CUDA
+    try:
+        if not torch.cuda.is_available():
+            import os
+            n_threads = max(1, int(os.cpu_count() or 1))
+            torch.set_num_threads(n_threads)
+            logger.info(f"cpu_threads={n_threads}")
+    except Exception:
+        pass
     # Log loss/time-decay policy for validator
     logger.info("loss=CrossEntropyLoss time_decay_lambda=0.98 weight_decay=1e-4 dropout=0.2 model=GRU(64,1)")
     feat = _read_parquet(features)

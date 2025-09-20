@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Dict, Optional
+import os
 import logging
 
 import numpy as np
@@ -44,6 +45,8 @@ def fit_if_rolling(
     out_rows = []
     win = pd.Timedelta(days=rolling_days)
     logger = logging.getLogger("p4")
+    cpu = os.cpu_count() or 1
+    logger.info(f"[IF] Using n_jobs={cpu} across cores")
     for sym, grp in df.groupby("symbol", sort=False):
         g = grp.copy()
         ts = g["ts"]
@@ -56,7 +59,7 @@ def fit_if_rolling(
             if mask.sum() < 32:  # need minimal window to fit IF stably
                 continue
             past = _robust_scale_past(g.loc[mask, feats])
-            model = IsolationForest(random_state=seed, n_estimators=100, contamination="auto")
+            model = IsolationForest(random_state=seed, n_estimators=100, contamination="auto", n_jobs=cpu)
             model.fit(past.values)
             x_t = _robust_scale_past(g.loc[[i], feats])
             s = -model.score_samples(x_t.values)[0]  # higher s => more anomalous
