@@ -207,7 +207,6 @@ def run(
             continue
         if fid is not None:
             probs_by_fold[fid] = dfp
-    any_oos = len(probs_by_fold) > 0
 
     # Group checkpoints by fold
     ckpt_ok_by_fold: Dict[int, bool] = {}
@@ -242,14 +241,13 @@ def run(
             vios.append("ckpt_missing_or_unloadable")
         pr_ok = False
         dfp = probs_by_fold.get(fid)
-        if dfp is not None and not dfp.empty:
+        if dfp is None or dfp.empty:
+            vios.append("oos_probs_missing")
+        else:
             ok_prob, prob_errs = _check_probs(dfp)
             pr_ok = ok_prob
             if not ok_prob:
                 vios.extend([f"probs:{e}" for e in prob_errs])
-        else:
-            # If we have some OOS files overall, treat missing per-fold as a warning
-            pr_ok = any_oos
 
         # 2) CV split integrity
         cv_ok = _cv_check_split(f.get("train", []), f.get("val", []), embargo_td) and _cv_check_split(

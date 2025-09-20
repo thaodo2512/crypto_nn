@@ -172,6 +172,7 @@ P5 Validation (artifacts)
   --train-log logs/p5_train.log \
   --metrics reports/p5_cv_metrics.json \
   --out-json reports/p5_validate.json --tz UTC --embargo 1D --window 144`
+  - Notes: Validator now enforces OOS probabilities per fold (no missing folds); if `artifacts/folds.json` is absent it builds fallback folds but still requires per‑fold OOS.
 
 Export OOS probabilities (for validation/calibration)
 - Docker: `docker compose run --rm p5_oos_export`
