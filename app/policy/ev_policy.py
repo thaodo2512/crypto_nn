@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
+from pathlib import Path
+import yaml
 
 import numpy as np
 import pandas as pd
@@ -20,6 +22,21 @@ class BarrierCfg:
 def _dynamic_k(vol_pctile: float, cfg: BarrierCfg) -> float:
     v = float(np.clip(vol_pctile, 0.0, 1.0))
     return float(cfg.k_atr_min + (cfg.k_atr_max - cfg.k_atr_min) * v)
+
+
+def load_barrier_cfg(path: str = "conf/barrier.yaml") -> BarrierCfg:
+    p = Path(path)
+    if not p.exists():
+        return BarrierCfg()
+    try:
+        data = yaml.safe_load(p.read_text()) or {}
+        return BarrierCfg(
+            horizon_bars=int(data.get("horizon_bars", 36)),
+            k_atr_min=float(data.get("k_atr_min", 1.0)),
+            k_atr_max=float(data.get("k_atr_max", 1.5)),
+        )
+    except Exception:
+        return BarrierCfg()
 
 
 def _impact_bps(liq60_pctile: float) -> float:
