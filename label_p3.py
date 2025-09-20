@@ -187,8 +187,9 @@ def validate(
     # Join with features by (symbol, ts)
     con = duckdb.connect()
     try:
-        con.execute("CREATE VIEW _lab AS SELECT * FROM read_parquet(?);", [labels])
-        con.execute("CREATE VIEW _feat AS SELECT * FROM read_parquet(?);", [features])
+        # DuckDB doesn't allow parameters in DDL; embed paths directly (trusted local paths)
+        con.execute(f"CREATE OR REPLACE VIEW _lab AS SELECT * FROM read_parquet('{labels}')")
+        con.execute(f"CREATE OR REPLACE VIEW _feat AS SELECT * FROM read_parquet('{features}')")
         lab_cnt = con.execute("SELECT COUNT(*), MIN(ts), MAX(ts) FROM _lab").fetchone()
         join_cnt = con.execute("SELECT COUNT(*) FROM _lab l INNER JOIN _feat f USING(symbol, ts)").fetchone()[0]
         hist = dict(con.execute("SELECT label, COUNT(*) FROM _lab GROUP BY 1 ORDER BY 1").fetchall())
