@@ -103,6 +103,22 @@ def run(
     typer.echo(f"OOS probs written under {out}")
 
 
+@app.callback()
+def _default(
+    ctx: typer.Context,
+    features: str = typer.Option(None, "--features"),
+    labels: str = typer.Option(None, "--labels"),
+    models_root: str = typer.Option("models/gru_5m", "--models-root"),
+    out: str = typer.Option("artifacts/p5_oos_probs", "--out"),
+    embargo: str = typer.Option("1D", "--embargo"),
+    folds_n: int = typer.Option(5, "--folds"),
+    window: int = typer.Option(144, "--window"),
+) -> None:
+    # Allow calling without subcommand as a convenience in Docker Compose
+    if ctx.invoked_subcommand is None:
+        if not features or not labels:
+            raise typer.BadParameter("Missing required options --features/--labels; use --help for usage.")
+        run(features=features, labels=labels, models_root=models_root, out=out, embargo=embargo, folds_n=folds_n, window=window)
+
 if __name__ == "__main__":
     app()
-

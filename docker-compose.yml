@@ -271,7 +271,7 @@ services:
   p5_oos_export:
     <<: *app
     command: [
-      "python", "p5_export_oos.py", "run",
+      "python", "p5_export_oos.py",
       "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
       "--labels", "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
       "--models-root", "models/gru_5m",
