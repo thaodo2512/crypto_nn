@@ -104,11 +104,31 @@ def _check_probs(df: pd.DataFrame) -> Tuple[bool, List[str]]:
     return len(errs) == 0, errs
 
 
-def _cv_check_split(tr: List[pd.Timestamp], nxt: List[pd.Timestamp], embargo_td: pd.Timedelta) -> bool:
-    if not tr or not nxt:
+def _cv_check_split(tr_spans, nxt_spans, embargo_td: pd.Timedelta) -> bool:
+    """Check purged split with embargo between TRAIN and the next split.
+
+    Accepts either:
+    - lists of timestamps (iterables of pd.Timestamp)
+    - lists of [start, end] strings/timestamps (span form from folds.json)
+    Rule: min(nxt_start) - max(tr_end) >= embargo_td and ranges disjoint.
+    """
+    if not tr_spans or not nxt_spans:
         return True
-    ok_gap = (min(nxt) - max(tr)) >= embargo_td
-    disjoint = set(tr).isdisjoint(set(nxt))
+
+    def to_bounds(spans) -> tuple[pd.Timestamp, pd.Timestamp]:
+        # If element is span [s,e], collect; if timestamps, treat bounds as (min, max)
+        if isinstance(spans[0], (list, tuple)) and len(spans[0]) == 2:
+            starts = [pd.to_datetime(s, utc=True) for s, _ in spans]
+            ends = [pd.to_datetime(e, utc=True) for _, e in spans]
+            return min(starts), max(ends)
+        else:
+            ts = [pd.to_datetime(t, utc=True) for t in spans]
+            return min(ts), max(ts)
+
+    tr_start, tr_end = to_bounds(tr_spans)
+    nx_start, nx_end = to_bounds(nxt_spans)
+    ok_gap = (nx_start - tr_end) >= embargo_td
+    disjoint = tr_end < nx_start
     return bool(ok_gap and disjoint)
 
 
