@@ -279,6 +279,12 @@ def run(
             F = len(use_cols)
             win_ok = (len(g) >= window) and (10 <= F <= 24)
         if not win_ok:
+            # helpful debug
+            try:
+                train_len = len(f.get("train", []))
+            except Exception:
+                train_len = 0
+            typer.echo(f"DEBUG fold{fid}: window_check len_g={len(g)} F={F} train_len={train_len}")
             vios.append("window_shape_mismatch")
         # If no train timestamps are provided, treat window check as satisfied (nothing to verify per-fold)
         if not f.get("train"):
