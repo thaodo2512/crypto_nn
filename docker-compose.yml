@@ -250,14 +250,14 @@ services:
   p8_export:
     <<: *app
     command: [
-      "python", "export_p8.py",
+      "python", "-m", "app.export.cli_p8_export", "onnx",
       "--ckpt", "models/gru_5m/*/best.pt",
       "--fp16",
       "--out", "export/model_5m_fp16.onnx",
       "--preproc", "conf/preproc_5m.yaml",
-      "--calib", "models/ensemble_5m.json",
+      "--ensemble", "models/ensemble_5m.json",
       "--window", "144",
-      "--sample", "16"
+      "--sample", "2048"
     ]
 
   # P5 – Small NN training (GRU)
