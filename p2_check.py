@@ -183,6 +183,23 @@ def run(
         raise typer.Exit(code=1)
 
 
+@app.callback()
+def main(
+    ctx: typer.Context,
+    features: Optional[str] = typer.Option(None, "--features"),
+    out_json: str = typer.Option("reports/p2_check_5m_80d.json", "--out-json"),
+    raw: Optional[str] = typer.Option(None, "--raw"),
+    bench_csv: Optional[str] = typer.Option(None, "--bench-csv"),
+    symbol: str = typer.Option("BTCUSDT", "--symbol"),
+    tz: str = typer.Option("UTC", "--tz"),
+) -> None:
+    # Allow calling without subcommand: python p2_check.py --features ...
+    if ctx.invoked_subcommand is None:
+        if not features:
+            typer.echo("Missing --features; use --help for usage.")
+            raise typer.Exit(code=2)
+        run(features=features, out_json=out_json, raw=raw, bench_csv=bench_csv, symbol=symbol, tz=tz)
+
+
 if __name__ == "__main__":
     app()
-
