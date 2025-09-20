@@ -141,17 +141,31 @@ def run(
     window: int = typer.Option(144, "--window"),
     mask: Optional[str] = typer.Option(None, "--mask"),
     strict: bool = typer.Option(False, "--strict", help="Strict mode: require OOS per fold and use folds.json only"),
+    verbose: bool = typer.Option(False, "--verbose", help="Print detailed debug information"),
+    sample_rows: int = typer.Option(3, "--sample-rows", help="Number of sample rows to print for debug"),
 ) -> None:
     violations_global: List[str] = []
 
     # Load basic inputs
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
+    if verbose:
+        try:
+            typer.echo(
+                f"DEBUG features: rows={len(feat):,} ts=[{str(feat['ts'].min())}..{str(feat['ts'].max())}] cols={len(feat.columns)}"
+            )
+            typer.echo(
+                f"DEBUG labels:   rows={len(lab):,} ts=[{str(lab['ts'].min())}..{str(lab['ts'].max())}] cols={len(lab.columns)}"
+            )
+        except Exception:
+            pass
     if feat.empty or lab.empty:
         violations_global.append("missing_features_or_labels")
     ts_sorted = feat.sort_values(["symbol", "ts"])['ts'] if not feat.empty else pd.Series([], dtype='datetime64[ns, UTC]')
     # Folds
     if strict:
+        if verbose:
+            typer.echo(f"DEBUG strict mode on; folds_json path={folds_json} exists={Path(folds_json).exists()}")
         if not Path(folds_json).exists():
             violations_global.append("folds_json_missing")
             folds = []
@@ -187,6 +201,9 @@ def run(
         violations_global.append("no_checkpoints_found")
     if not probs_files:
         violations_global.append("no_oos_probs_found")
+    if verbose:
+        typer.echo(f"DEBUG ckpts: {len(ckpts)} files; models_glob='{models_glob}'")
+        typer.echo(f"DEBUG oos files: {len(probs_files)} files; oos_glob='{oos_probs_glob}'")
 
     # Metrics and logs
     try:
@@ -213,6 +230,12 @@ def run(
             continue
         if fid is not None:
             probs_by_fold[fid] = dfp
+    if verbose and probs_by_fold:
+        try:
+            summary = {fid: len(df) for fid, df in probs_by_fold.items()}
+            typer.echo(f"DEBUG oos per fold counts: {summary}")
+        except Exception:
+            pass
 
     # Group checkpoints by fold
     ckpt_ok_by_fold: Dict[int, bool] = {}
@@ -226,6 +249,8 @@ def run(
             ok = False
         if fid is not None:
             ckpt_ok_by_fold[fid] = ok
+    if verbose and ckpt_ok_by_fold:
+        typer.echo(f"DEBUG ckpt loadable folds: {[fid for fid, ok in ckpt_ok_by_fold.items() if ok]}")
 
     # Parse log for loss type and lambda
     loss_type = None
@@ -249,11 +274,23 @@ def run(
         dfp = probs_by_fold.get(fid)
         if dfp is None or dfp.empty:
             vios.append("oos_probs_missing")
+            if verbose:
+                expected_path = f"fold{fid}.parquet"
+                typer.echo(f"DEBUG fold{fid}: missing or empty OOS; expected file name like '{expected_path}' under oos dir")
         else:
             ok_prob, prob_errs = _check_probs(dfp)
             pr_ok = ok_prob
             if not ok_prob:
                 vios.extend([f"probs:{e}" for e in prob_errs])
+                if verbose:
+                    typer.echo(f"DEBUG fold{fid}: prob errors {prob_errs}; cols={list(dfp.columns)}")
+            if verbose:
+                try:
+                    typer.echo(f"DEBUG fold{fid}: oos rows={len(dfp)} sample:")
+                    cols = [c for c in ["ts","symbol","p_long","p_short","p_wait","y","fold_id","split"] if c in dfp.columns]
+                    typer.echo(dfp[cols].head(sample_rows).to_string(index=False))
+                except Exception:
+                    pass
 
         # 2) CV split integrity
         cv_ok = _cv_check_split(f.get("train", []), f.get("val", []), embargo_td) and _cv_check_split(

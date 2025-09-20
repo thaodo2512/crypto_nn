@@ -266,7 +266,7 @@ services:
       "--train-log", "logs/p5_train.log",
       "--metrics", "reports/p5_cv_metrics.json",
       "--out-json", "reports/p5_validate.json",
-      "--tz", "UTC", "--embargo", "1D", "--window", "144", "--strict"
+      "--tz", "UTC", "--embargo", "1D", "--window", "144", "--strict", "--verbose", "--sample-rows", "3"
     ]
   p5_oos_export:
     <<: *app

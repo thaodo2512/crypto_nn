@@ -145,12 +145,13 @@ def _default(
     embargo: str = typer.Option("1D", "--embargo"),
     folds_n: int = typer.Option(5, "--folds"),
     window: int = typer.Option(144, "--window"),
+    folds_json: str = typer.Option("artifacts/folds.json", "--folds-json"),
 ) -> None:
     # Allow calling without subcommand as a convenience in Docker Compose
     if ctx.invoked_subcommand is None:
         if not features or not labels:
             raise typer.BadParameter("Missing required options --features/--labels; use --help for usage.")
-        run(features=features, labels=labels, models_root=models_root, out=out, embargo=embargo, folds_n=folds_n, window=window)
+        run(features=features, labels=labels, models_root=models_root, out=out, embargo=embargo, folds_n=folds_n, window=window, folds_json=folds_json)
 
 if __name__ == "__main__":
     app()
