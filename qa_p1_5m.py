@@ -70,12 +70,25 @@ def evaluate_qa(df: pd.DataFrame, horizon_days: int = 80) -> Tuple[Dict, bool]:
             "max": float(col.max(skipna=True)) if col.dtype.kind in {"f", "i"} else 0.0,
         }
 
+    # Offenders and examples
+    missing_cols = {c: v.get("nan_ratio", 0.0) for c, v in per_column.items() if v.get("nan_ratio", 0.0) > 0.0}
+    imputed_cols = {c: v.get("imputed_ratio", 0.0) for c, v in per_column.items() if v.get("imputed_ratio", 0.0) > 0.05}
+    present_set = set(pd.to_datetime(window["ts"].unique(), utc=True))
+    miss_examples = [t.isoformat() for t in expected_idx if t not in present_set][:10]
+    dup_examples = []
+    if dup_key_count:
+        dup_rows = window[window.duplicated(subset=["symbol", "ts"], keep=False)][["symbol", "ts"]].head(5)
+        dup_examples = [{"symbol": str(r.symbol), "ts": pd.to_datetime(r.ts, utc=True).isoformat()} for r in dup_rows.itertuples()]
+
     report = {
         "expected_bars_80d": horizon_days * 24 * 12,
         "present_bars": present_bars,
         "gap_ratio": gap_ratio,
         "dup_key_count": dup_key_count,
         "per_column": per_column,
+        "offenders": {"missing_cols": missing_cols, "imputed_cols": imputed_cols},
+        "examples": {"missing_ts": miss_examples, "duplicate_keys": dup_examples},
+        "thresholds": {"gap_ratio_max": 0.005, "impute_ratio_max": 0.05},
     }
     # gate
     fail = gap_ratio > 0.005
@@ -105,6 +118,23 @@ def qa(
         json.dump(report, f, indent=2)
     if fail:
         typer.echo("FAIL gaps>0.5% or NaN>0 or impute>5%")
+        try:
+            offenders = report.get("offenders", {})
+            miss_cols = offenders.get("missing_cols", {})
+            imp_cols = offenders.get("imputed_cols", {})
+            typer.echo(f"  gap_ratio={report.get('gap_ratio'):.6f}, present={report.get('present_bars')}, expected={report.get('expected_bars_80d')}")
+            if report.get("dup_key_count", 0):
+                typer.echo(f"  duplicates={report.get('dup_key_count')}")
+            if miss_cols:
+                typer.echo("  missing columns (nan_ratio>0): " + ", ".join([f"{k}:{v:.3f}" for k, v in miss_cols.items()]))
+            if imp_cols:
+                typer.echo("  imputed>5%: " + ", ".join([f"{k}:{v:.3f}" for k, v in imp_cols.items()]))
+            ex = report.get("examples", {})
+            if ex.get("missing_ts"):
+                typer.echo("  missing ts examples: " + ", ".join(ex.get("missing_ts", [])[:5]))
+            typer.echo(f"  details → {out}")
+        except Exception:
+            pass
         raise typer.Exit(code=1)
     typer.echo("PASS")
 
