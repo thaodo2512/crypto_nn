@@ -214,7 +214,7 @@ services:
   p6_validate:
     <<: *app
     command: [
-      "python", "p6_validate.py", "run",
+      "python", "p6_validate.py",
       "--val-oos-glob", "artifacts/p5_oos_probs/fold*.parquet",
       "--calib", "models/calib.json",
       "--ensemble", "models/ensemble_5m.json",
