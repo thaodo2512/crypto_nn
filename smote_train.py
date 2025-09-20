@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -26,7 +26,13 @@ def smote_long_short_only(X: np.ndarray, y: np.ndarray, seed: int = 42) -> Tuple
 
 
 def apply_per_fold(
-    X: np.ndarray, y: np.ndarray, meta: pd.DataFrame, folds: List[Dict], out_root: str, seed: int = 42
+    X: np.ndarray,
+    y: np.ndarray,
+    meta: pd.DataFrame,
+    folds: List[Dict],
+    out_root: str,
+    seed: int = 42,
+    ts_for_folds: Optional[pd.Series] = None,
 ) -> Dict[int, Dict[str, int]]:
     """Apply SMOTE per fold on TRAIN only. Persist to data/aug/train_smote/<fold>/train.parquet.
 
@@ -34,15 +40,16 @@ def apply_per_fold(
     """
     out_counts: Dict[int, Dict[str, int]] = {}
     Path(out_root).mkdir(parents=True, exist_ok=True)
-    # Build ts index alignment
-    order = meta.sort_values("ts").reset_index(drop=True)
-    ts_all = order["ts"].values
+    # For mapping fold indices (built on features ts) to meta rows, use timestamp membership
+    meta_ts = pd.to_datetime(meta["ts"], utc=True)
     for f in folds:
         fid = f["fold_id"]
-        # Train meta rows by intersecting indices
-        train_rows = order.iloc[f["train_idx"]]
-        idx_mask = order.index.isin(train_rows.index)
-        X_tr, y_tr = X[idx_mask], y[idx_mask]
+        if ts_for_folds is None:
+            raise ValueError("ts_for_folds must be provided to map fold indices to meta timestamps")
+        train_ts = pd.to_datetime(pd.Series(ts_for_folds).iloc[f["train_idx"]], utc=True)
+        train_ts_set = set(train_ts.tolist())
+        idx_mask = meta_ts.isin(train_ts_set)
+        X_tr, y_tr = X[idx_mask.values], y[idx_mask.values]
         # Pre counts
         pre_counts = {c: int((y_tr == c).sum()) for c in ["LONG", "SHORT", "WAIT"]}
         # SMOTE only on train
@@ -60,4 +67,3 @@ def apply_per_fold(
         df["y"] = y_aug
         pq.write_table(pa.Table.from_pandas(df, preserve_index=False), fold_dir / "train.parquet")
     return out_counts
-

@@ -95,7 +95,7 @@ def smote_windows(
     X, y, meta = build_sequence_windows(feat, lab, W=W)
     if X.size == 0:
         raise typer.BadParameter("No windows created; consider reducing W")
-    counts = apply_per_fold(X, y, meta, folds, out_root=out, seed=seed)
+    counts = apply_per_fold(X, y, meta, folds, out_root=out, seed=seed, ts_for_folds=ts)
     # Build a 'pre' directory mirroring per-fold counts for reporting (minimal placeholder)
     pre_dir = Path("data/train")
     pre_dir.mkdir(parents=True, exist_ok=True)
@@ -120,4 +120,3 @@ def report_classmix(
 
 if __name__ == "__main__":
     app()
-
