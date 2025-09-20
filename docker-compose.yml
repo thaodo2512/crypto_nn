@@ -235,6 +235,16 @@ services:
       "--H", "36",
       "--out", "decisions"
     ]
+  p7_calib_merge:
+    <<: *app
+    command: [
+      "python", "p7_calib_merge.py",
+      "--probs-glob", "artifacts/p5_oos_probs/fold*.parquet",
+      "--calib", "models/calib.json",
+      "--ensemble", "models/ensemble_5m.json",
+      "--out", "artifacts/p6_calibrated.parquet",
+      "--split", "oos"
+    ]
 
   # P8 – ONNX FP16 export + parity check
   p8_export:
