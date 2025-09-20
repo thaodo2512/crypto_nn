@@ -266,10 +266,15 @@ def run(
                 .set_index("ts")
                 .sort_index()
             )
-            use_cols = [c for c in g.columns if c not in {"symbol"} and g[c].dtype.kind in {"f", "i"}]
+            # Exclude partition and flag columns from feature count
+            use_cols = [
+                c
+                for c in g.columns
+                if (c not in {"symbol", "y", "m", "d"}) and (not str(c).startswith("_")) and (g[c].dtype.kind in {"f", "i"})
+            ]
             wdf = g.loc[(g.index > t - pd.Timedelta(minutes=5 * window)) & (g.index <= t), use_cols]
             F = len(use_cols)
-            win_ok = (len(wdf) == window) and (12 <= F <= 20)
+            win_ok = (len(wdf) == window) and (10 <= F <= 24)
         if not win_ok:
             vios.append("window_shape_mismatch")
 

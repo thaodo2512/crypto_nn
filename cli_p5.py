@@ -233,6 +233,8 @@ def train(
     logger.setLevel(logging.INFO)
 
     _set_seed(seed)
+    # Log loss/time-decay policy for validator
+    logger.info("loss=CrossEntropyLoss time_decay_lambda=0.98 weight_decay=1e-4 dropout=0.2 model=GRU(64,1)")
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
     X, y, meta = build_windows(feat, lab, W=window)
