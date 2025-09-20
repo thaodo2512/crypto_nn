@@ -1,0 +1,48 @@
+version: "3.9"
+services:
+  trainer:
+    build:
+      context: .
+      dockerfile: docker/pc.Dockerfile
+    container_name: trainer
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    command: >-
+      bash -lc "
+        uv pip install -e . && \
+        meta train --model gru --window 144 --cv walkforward --embargo 1D \
+          --features 'data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet' \
+          --labels 'data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet' \
+          --out models/gru_5m --seed 42 --folds 5 && \
+        meta calibrate --probs 'artifacts/p5_oos_probs/*.parquet' --method temperature --out models/calib.json || true && \
+        tail -f /dev/null"
+
+  exporter:
+    build:
+      context: .
+      dockerfile: docker/pc.Dockerfile
+    container_name: exporter
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    command: >-
+      bash -lc "
+        uv pip install -e . && \
+        python export_p8.py onnx \
+          --ckpt 'models/gru_5m/*/best.pt' \
+          --fp16 --out export/model_5m_fp16.onnx \
+          --preproc conf/preproc_5m.yaml --calib models/ensemble_5m.json \
+          --window 144 --sample 16 && \
+        sleep infinity"
+
+  ops:
+    image: alpine:3.20
+    container_name: ops
+    volumes:
+      - ./:/workspace
+      - ${JETSON_SSH_KEY}:${JETSON_SSH_KEY}:ro
+    working_dir: /workspace
+    entrypoint: ["/bin/sh","-c"]
+    command: "sleep infinity"
+
