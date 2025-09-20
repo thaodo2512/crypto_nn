@@ -19,6 +19,7 @@ services:
       "--symbol", "BTCUSDT",
       "--tf", "5m",
       "--days", "80",
+      "--slice-days", "7",
       "--out", "data/parquet/5m/BTCUSDT"
     ]
   qa_5m:
