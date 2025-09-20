@@ -68,19 +68,27 @@ def _parse_folds_json(path: str, ts_sorted: pd.Series) -> List[Dict]:
         raw_folds = [{"fold_id": int(k), **v} for k, v in obj.items()]
     for f in raw_folds:
         fid = int(f.get("fold_id"))
-        def to_ts_list(xs: List) -> List[pd.Timestamp]:
+
+        def is_span_list(xs: List) -> bool:
+            return bool(xs) and isinstance(xs[0], (list, tuple)) and len(xs[0]) == 2
+
+        def to_ts_or_spans(xs: List):
+            # If spans [[start,end], ...] → pass through as strings
+            if is_span_list(xs):
+                return [[str(s), str(e)] for s, e in xs]
+            # Else interpret as list of timestamps or integer positions
             out: List[pd.Timestamp] = []
             for v in xs:
                 if isinstance(v, (int, np.integer)):
-                    # map position to ts
                     if 0 <= int(v) < len(idx_to_ts):
                         out.append(pd.to_datetime(idx_to_ts[int(v)], utc=True))
                 else:
                     out.append(pd.to_datetime(v, utc=True))
             return out
-        tr = to_ts_list(f.get("train", []))
-        vl = to_ts_list(f.get("val", []))
-        oo = to_ts_list(f.get("oos", []))
+
+        tr = to_ts_or_spans(f.get("train", []))
+        vl = to_ts_or_spans(f.get("val", []))
+        oo = to_ts_or_spans(f.get("oos", []))
         folds.append({"fold_id": fid, "train": tr, "val": vl, "oos": oo})
     folds = sorted(folds, key=lambda d: d["fold_id"])  # type: ignore
     return folds
