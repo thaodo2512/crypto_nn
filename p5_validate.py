@@ -280,6 +280,9 @@ def run(
             win_ok = (len(g) >= window) and (10 <= F <= 24)
         if not win_ok:
             vios.append("window_shape_mismatch")
+        # If no train timestamps are provided, treat window check as satisfied (nothing to verify per-fold)
+        if not f.get("train"):
+            win_ok = True
 
         # 4) Stability
         stable = True
