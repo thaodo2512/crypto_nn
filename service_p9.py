@@ -20,6 +20,10 @@ from fastapi.responses import JSONResponse
 import typer
 
 from policy_p7 import _ev_decision_row, _dynamic_k
+from app.runtime.model_session import ModelSession
+from app.runtime.onnx_introspect import infer_io
+from app.runtime.throttle import Throttler, load_tau
+from app.runtime.metrics import MetricsSink, aggregate_metrics
 
 
 app_cli = typer.Typer(help="P9 – Real-time scoring & decision service (Jetson)")
@@ -64,43 +68,15 @@ class HealthMonitor:
         return HealthStatus(temp_c=50.0, gpu_util=30.0)
 
 
-class ModelSession:
-    def __init__(self, onnx_path: Optional[str], window: int, input_dim: int, temperature: float = 1.0) -> None:
-        self.window = window
-        self.input_dim = input_dim
-        self.temperature = temperature
-        self.dummy = onnx_path is None or os.getenv("P9_DUMMY", "0") == "1"
-        if not self.dummy:
-            providers = [
-                ("CUDAExecutionProvider", {}),
-                ("CPUExecutionProvider", {}),
-            ]
-            try:
-                self.sess = ort.InferenceSession(onnx_path, providers=[p for p, _ in providers])
-            except Exception:
-                self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
-        else:
-            self.sess = None
-        # ONNX IO names (Phase 8 spec): inputs -> probs
-        self.input_name = "inputs"
-        self.output_name = "probs"
-
-    def predict_proba(self, win: np.ndarray) -> np.ndarray:
-        # win: [W,F]
-        x = win[np.newaxis, :, :].astype(np.float32)
-        if self.dummy:
-            # simple linear logits for speed
-            logits = x.mean(axis=(1, 2), keepdims=True) * np.array([[[-0.1, 0.2, -0.1]]])
-            p = softmax_np(logits / max(self.temperature, 1e-6)).squeeze(0)
-            return p
-        else:
-            # P8 ONNX already outputs probabilities
-            probs = self.sess.run([self.output_name], {self.input_name: x.astype(np.float16)})[0]
-            return probs.squeeze(0).astype(np.float32)
+metrics_path = Path("logs/edge_metrics.jsonl")
 
 
-def create_app(model: ModelSession, k_min: float, k_max: float, H: int, monitor: Optional[HealthMonitor] = None) -> FastAPI:
+def create_app(model: ModelSession, k_min: float, k_max: float, H: int, monitor: Optional[Throttler] = None, taus: Optional[dict] = None) -> FastAPI:
     api = FastAPI()
+    sink = MetricsSink(metrics_path)
+
+    tau_long = float(taus.get("tau_long", 0.55)) if taus else 0.55
+    tau_short = float(taus.get("tau_short", 0.55)) if taus else 0.55
 
     @api.get("/health")
     def health() -> JSONResponse:
@@ -112,10 +88,16 @@ def create_app(model: ModelSession, k_min: float, k_max: float, H: int, monitor:
         win = np.array(payload.get("window", []), dtype=np.float32)
         if win.ndim != 2:
             return JSONResponse({"error": "window must be 2D [W,F]"}, status_code=400)
-        t0 = time.perf_counter()
+        t_total0 = time.perf_counter()
+        t_feat_ms = 0.0
+        t_nn0 = time.perf_counter()
         p = model.predict_proba(win)
-        dt = (time.perf_counter() - t0) * 1000
-        return JSONResponse({"p_wait": float(p[0]), "p_long": float(p[1]), "p_short": float(p[2]), "latency_ms": dt})
+        t_nn_ms = (time.perf_counter() - t_nn0) * 1000
+        t_policy_ms = 0.0
+        t_total_ms = (time.perf_counter() - t_total0) * 1000
+        rec = {"t_feat_ms": t_feat_ms, "t_nn_ms": t_nn_ms, "t_policy_ms": t_policy_ms, "t_total_ms": t_total_ms}
+        sink.append({"type": "score", **rec})
+        return JSONResponse({"p_wait": float(p[0]), "p_long": float(p[1]), "p_short": float(p[2]), **rec})
 
     @api.post("/decide")
     def decide(payload: Dict[str, Any]) -> JSONResponse:
@@ -125,20 +107,39 @@ def create_app(model: ModelSession, k_min: float, k_max: float, H: int, monitor:
         close = float(payload.get("close", 0.0))
         atr_pct = float(payload.get("atr_pct", 0.0))
         vol_pct = float(payload.get("vol_pctile", 0.5))
-        t0 = time.perf_counter()
-        # Monitor throttle
-        throttled = False
-        if monitor:
-            hs = monitor.read()
-            throttled = (hs.temp_c >= 70.0) or (hs.gpu_util >= 80.0)
+        candle_close_ts = payload.get("candle_close_ts")
+        t_total0 = time.perf_counter()
+        t_feat_ms = 0.0
+        # Monitor readings
+        hs = monitor.read() if monitor else None
+        t_nn0 = time.perf_counter()
         p = model.predict_proba(win)
+        t_nn_ms = (time.perf_counter() - t_nn0) * 1000
         side, size, tp_px, sl_px, ev, reason = _ev_decision_row(
             float(p[1]), float(p[2]), close, atr_pct, k_min, k_max, vol_pct, type("C", (), {"cost_frac": lambda self: 0.0005})()
         )
-        # Apply throttle: downgrade weak alerts
-        if throttled and (max(p[1], p[2]) < 0.9):
+        t_policy_ms = (time.perf_counter() - t_nn0) * 1000 - t_nn_ms
+        # Throttle based on taus with 2% cushion
+        maxp = float(max(p[1], p[2]))
+        side_pref = "LONG" if p[1] >= p[2] else "SHORT"
+        tau_side = tau_long if side_pref == "LONG" else tau_short
+        weak = maxp < (tau_side + 0.02)
+        throttled = monitor.should_throttle(hs.temp_c, hs.gpu_util) if monitor and hs else False
+        if throttled and weak:
             side, size, reason = "WAIT", 0.0, "throttle"
-        dt = (time.perf_counter() - t0) * 1000
+        t_total_ms = (time.perf_counter() - t_total0) * 1000
+        rec = {"t_feat_ms": t_feat_ms, "t_nn_ms": t_nn_ms, "t_policy_ms": t_policy_ms, "t_total_ms": t_total_ms}
+        sink.append({"type": "decide", **rec})
+        # SLA logging
+        if candle_close_ts:
+            try:
+                cc = pd.to_datetime(candle_close_ts, utc=True)
+                now = pd.Timestamp.utcnow().tz_localize("UTC")
+                delta_min = float((now - cc).total_seconds() / 60.0)
+                ok = bool(delta_min <= 10.0)
+                sink.append_sla(now.isoformat(), str(cc), delta_min, ok)
+            except Exception:
+                pass
         return JSONResponse({
             "side": side,
             "size": size,
@@ -146,7 +147,7 @@ def create_app(model: ModelSession, k_min: float, k_max: float, H: int, monitor:
             "SL_px": sl_px,
             "EV": ev,
             "reason": reason,
-            "latency_ms": dt,
+            **rec,
         })
 
     return api
@@ -156,16 +157,20 @@ def create_app(model: ModelSession, k_min: float, k_max: float, H: int, monitor:
 def api(
     onnx_path: Optional[str] = typer.Option(None, "--onnx", help="ONNX model path (optional; dummy if missing)"),
     window: int = typer.Option(144, "--window"),
-    input_dim: int = typer.Option(16, "--input-dim"),
-    temperature: float = typer.Option(1.0, "--temperature"),
+    apply_temp: bool = typer.Option(False, "--apply-temp/--no-apply-temp"),
     k_min: float = typer.Option(1.0, "--k-min"),
     k_max: float = typer.Option(1.5, "--k-max"),
     H: int = typer.Option(36, "--H"),
     port: int = typer.Option(8080, "--port"),
 ) -> None:
-    monitor = HealthMonitor()
-    model = ModelSession(onnx_path, window=window, input_dim=input_dim, temperature=temperature)
-    app = create_app(model, k_min=k_min, k_max=k_max, H=H, monitor=monitor)
+    taus = load_tau("reports/calibration_metrics.json")
+    throttler = Throttler(thresh_temp=70.0, thresh_gpu=80.0)
+    if onnx_path:
+        F = infer_io(onnx_path, expect_window=window)
+        model = ModelSession(onnx_path, window=window, input_dim=F, apply_temp=apply_temp)
+    else:
+        model = ModelSession(None, window=window, input_dim=16, apply_temp=False)
+    app = create_app(model, k_min=k_min, k_max=k_max, H=H, monitor=throttler, taus=taus)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
@@ -175,33 +180,41 @@ def loadtest(
     duration: str = typer.Option("10m", "--duration"),
     out: str = typer.Option("reports/p9_latency.json", "--out"),
     window: int = typer.Option(144, "--window"),
-    input_dim: int = typer.Option(16, "--input-dim"),
+    onnx: Optional[str] = typer.Option(None, "--onnx"),
 ) -> None:
-    # In-process Poisson generator and scorer (dummy model)
+    # In-process Poisson generator and scorer with real ONNX if provided
     total_s = 600 if duration.endswith("m") else 60
     if duration.endswith("m"):
         total_s = int(float(duration[:-1]) * 60)
     elif duration.endswith("s"):
         total_s = int(float(duration[:-1]))
     lam = rate / 3600.0  # per second
-    inter_arrival = lambda: np.random.exponential(1 / lam)
-    model = ModelSession(onnx_path=None, window=window, input_dim=input_dim, temperature=1.0)
-    latencies = []
+    inter_arrival = lambda: np.random.exponential(1 / lam) if lam > 0 else 0
+    if onnx:
+        F = infer_io(onnx, expect_window=window)
+        model = ModelSession(onnx, window=window, input_dim=F, apply_temp=False)
+    else:
+        model = ModelSession(None, window=window, input_dim=16, apply_temp=False)
+    sink = MetricsSink(metrics_path)
     t = 0.0
+    n = 0
     while t < total_s:
-        # generate request
-        win = np.random.randn(window, input_dim).astype(np.float32)
-        t0 = time.perf_counter()
-        _ = model.predict_proba(win)
-        latencies.append((time.perf_counter() - t0) * 1000)
+        win = np.random.randn(window, model.input_dim).astype(np.float32)
+        t_total0 = time.perf_counter()
+        t_feat_ms = 0.0
+        t_nn0 = time.perf_counter()
+        p = model.predict_proba(win)
+        t_nn_ms = (time.perf_counter() - t_nn0) * 1000
+        t_policy_ms = 0.0
+        t_total_ms = (time.perf_counter() - t_total0) * 1000
+        sink.append({"type": "loadtest", "t_feat_ms": t_feat_ms, "t_nn_ms": t_nn_ms, "t_policy_ms": t_policy_ms, "t_total_ms": t_total_ms})
+        n += 1
+        if lam <= 0:
+            break
         t += inter_arrival()
-    lat = np.array(latencies)
-    p50 = float(np.percentile(lat, 50)) if len(lat) else 0.0
-    p99 = float(np.percentile(lat, 99)) if len(lat) else 0.0
-    Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as f:
-        json.dump({"p50_ms": p50, "p99_ms": p99, "n": len(lat)}, f, indent=2)
-    print(json.dumps({"p50_ms": p50, "p99_ms": p99, "n": len(lat)}))
+    # Aggregate metrics
+    report = aggregate_metrics(metrics_path, out)
+    print(json.dumps(report))
 
 
 @app_cli.command("monitor")

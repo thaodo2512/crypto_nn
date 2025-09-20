@@ -14,4 +14,4 @@ services:
       - /opt/app/conf:/opt/app/conf
       - /opt/app/data:/opt/app/data
       - /var/log/app:/var/log/app
-    command: ["python", "/opt/app/service_p9.py", "api", "--port", "8080", "--onnx", "/opt/app/models/current.onnx", "--window", "144", "--input-dim", "19"]
+    command: ["python", "/opt/app/service_p9.py", "api", "--port", "8080", "--onnx", "/opt/app/models/current.onnx", "--window", "144"]
