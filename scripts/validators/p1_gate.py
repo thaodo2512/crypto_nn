@@ -26,7 +26,16 @@ def main() -> None:
     # Build exact grid for last N days
     end = df["ts"].max()
     start = end - pd.Timedelta(days=days) + pd.Timedelta(minutes=5)
-    grid = pd.date_range(start.floor(tf), end.ceil(tf), freq="5min", tz="UTC", inclusive="right")
+    # Normalize TF like '5m' → '5min'
+    if tf.endswith("m"):
+        try:
+            mins = int(tf[:-1])
+        except Exception:
+            mins = 5
+        freq = f"{mins}min"
+    else:
+        freq = "5min"
+    grid = pd.date_range(start.floor(freq), end.ceil(freq), freq=freq, tz="UTC", inclusive="right")
     present = df[(df["ts"] >= grid.min()) & (df["ts"] <= grid.max())]["ts"].unique()
     gap_ratio = 1 - (len(present) / max(1, len(grid)))
     # NaN ratio, impute flags if present
