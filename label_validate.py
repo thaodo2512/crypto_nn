@@ -158,13 +158,33 @@ def run(
 ) -> None:
     # Load data
     lab = _read_parquet(labels)
-    if lab.empty:
-        typer.echo("FAIL: no label rows found")
-        raise typer.Exit(code=1)
     feat = _read_parquet(features)
-    if feat.empty:
-        typer.echo("FAIL: no features rows found")
+    # Early diagnostics always write a report for operator visibility
+    if lab.empty:
+        Path(Path(out_json).parent).mkdir(parents=True, exist_ok=True)
+        with open(out_json, "w") as f:
+            json.dump({
+                "error": "no_labels",
+                "labels_glob": labels,
+                "features_glob": features,
+                "pass": False,
+                "violations": ["no_labels_found"],
+            }, f, indent=2)
+        typer.echo("FAIL: no label rows found (wrote report)")
         raise typer.Exit(code=1)
+    if feat.empty:
+        Path(Path(out_json).parent).mkdir(parents=True, exist_ok=True)
+        with open(out_json, "w") as f:
+            json.dump({
+                "error": "no_features",
+                "labels_glob": labels,
+                "features_glob": features,
+                "pass": False,
+                "violations": ["no_features_found"],
+            }, f, indent=2)
+        typer.echo("FAIL: no features rows found (wrote report)")
+        raise typer.Exit(code=1)
+    typer.echo(f"Rows: labels={len(lab):,}, features={len(feat):,}")
     # Ensure OHLC present for ATR/barrier checks
     feat = _ensure_ohlc(feat, raw)
 
@@ -277,4 +297,3 @@ def _main_callback(
         if not labels or not features:
             typer.echo("Missing required options. Use --help for usage.")
             raise typer.Exit(code=2)
-
