@@ -43,7 +43,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python label_p3.py triple-barrier --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --raw \"data/parquet/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out \"data/labels/${TF:-5m}/$$sym\" --tf ${TF:-5m} --k 1.2 --H ${H:-36} --atr-window 14"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python label_p3.py triple-barrier --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --raw \"data/parquet/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out \"data/labels/${TF:-5m}/$$sym\" --tf ${TF:-5m} --k 1.2 --H ${H:-36} --atr_window 14"]
 
   p4_sampling:
     profiles: ["train"]
