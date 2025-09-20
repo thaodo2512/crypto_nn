@@ -1,0 +1,105 @@
+version: "3.9"
+
+services:
+  p1_ingest:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    environment:
+      - TF=${TF:-5m}
+    command: ["bash","-lc","poetry run ingest --symbols ${SYMS:-BTCUSDT} --days ${DAYS:-90}"]
+
+  p2_features:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    command: ["bash","-lc","poetry run features build --tf ${TF:-5m}"]
+
+  p3_label:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    command: ["bash","-lc","poetry run label triple-barrier --k 1.2 --H ${H:-36}"]
+
+  p4_sampling:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    command: ["bash","-lc","poetry run iforest train --rolling 30d && poetry run iforest score --emit-alerts || poetry run sampling stratify --tf ${TF:-5m}"]
+
+  p5_train:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    gpus: all
+    environment:
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+      - NVIDIA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    command: ["bash","-lc","poetry run meta train --model gru --window ${WINDOW:-144} --cv walkforward --focal --tf ${TF:-5m}"]
+
+  p6_calibrate:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    command: ["bash","-lc","poetry run meta calibrate --method temperature"]
+
+  p6_thresholds:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    command: ["bash","-lc","poetry run meta thresholds grid --objective ev_per_trade --tf ${TF:-5m}"]
+
+  p8_export:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    command: ["bash","-lc","poetry run export onnx --fp16 --window ${WINDOW:-144}"]
+
