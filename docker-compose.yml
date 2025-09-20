@@ -211,6 +211,17 @@ services:
       "--cost", "bps:5",
       "--out", "reports/p6_oos_summary.json"
     ]
+  p6_validate:
+    <<: *app
+    command: [
+      "python", "p6_validate.py", "run",
+      "--val-oos-glob", "artifacts/p5_oos_probs/fold*.parquet",
+      "--calib", "models/calib.json",
+      "--ensemble", "models/ensemble_5m.json",
+      "--summary", "reports/p6_oos_summary.json",
+      "--curves", "reports/p6_curves.png",
+      "--out-json", "reports/p6_validate.json"
+    ]
 
   # P7 – EV gating policy
   p7_decide:

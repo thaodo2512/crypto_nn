@@ -189,6 +189,12 @@ Export OOS probabilities (for validation/calibration)
 - Calibrate temps: `docker compose run --rm p6_calibrate`
 - Ensemble by EV weights: `docker compose run --rm p6_ensemble`
 - Tune τ: `docker compose run --rm p6_tune_threshold`
+- Validate P6 artifacts: `docker compose run --rm p6_validate`
+- Expected artifacts:
+  - Calibration JSON: `models/calib.json` (per-fold temperature, ECE)
+  - Ensemble JSON: `models/ensemble_5m.json` (non‑negative weights summing to 1)
+  - Tuning summary: `reports/p6_oos_summary.json` (best_tau, EV curves) and `reports/p6_curves.png`
+  - Inputs: VAL+OOS probs in `artifacts/p5_oos_probs/fold*.parquet`
 
 ## Phase P7 – EV Gating Policy
 - Decide: `python policy_p7.py decide --probs artifacts/p6_calibrated.parquet --atr data/atr_5m.parquet --k-range-min 1.0 --k-range-max 1.5 --H 36 --out decisions/`
