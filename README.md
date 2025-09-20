@@ -206,6 +206,35 @@ Export OOS probabilities (for validation/calibration)
 - Outputs: `export/model_5m_fp16.onnx`, `reports/p8_parity.json` (MSE, sha256), logs in `logs/p8_export.log`.
 - Acceptance: parity MSE < 1e-3 and checksum logged.
 
+## Train‑Only Stack (Offline P1→P8)
+- Compose file: `docker-compose.train.yml` (profile `train`). No ports, no edge services.
+- Environment: copy `scripts/env.train.example` → `scripts/env.train` and edit if needed.
+  - Keys: `SYMS`, `TF` (5m), `WINDOW` (144), `H` (36), `DAYS`, `CUDA_VISIBLE_DEVICES`.
+- Orchestrator (end‑to‑end with gates):
+  - `bash scripts/train_full.sh`
+  - Runs phases sequentially with acceptance gates; fails fast on any violation.
+- Individual phases (compose):
+  - `docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest`
+  - `docker compose -f docker-compose.train.yml --profile train run --rm p2_features`
+  - `docker compose -f docker-compose.train.yml --profile train run --rm p3_label`
+  - `docker compose -f docker-compose.train.yml --profile train run --rm p4_sampling`
+  - `docker compose -f docker-compose.train.yml --profile train run --rm p5_train`   (GPU only here)
+  - `docker compose -f docker-compose.train.yml --profile train run --rm p6_calibrate && \
+     docker compose -f docker-compose.train.yml --profile train run --rm p6_thresholds`
+  - `docker compose -f docker-compose.train.yml --profile train run --rm p8_export`
+- Validators (acceptance gates): `scripts/validators/*_gate.py`
+  - P1: gaps≤0.5%, NaN=0
+  - P2: 10–20 features, NaN=0
+  - P3: labels join features 1:1
+  - P4: TRAIN WAIT≤60%
+  - P5: CV=walkforward, embargo=1D, window=144, no divergence
+  - P6: EV/trade>0 (95% CI), ECE≤10%
+  - P8: MSE(probs)<1e‑3 and ONNX checksum present
+- Makefile shortcuts:
+  - `make print_env` – show effective SYMS/TF/WINDOW/H/DAYS
+  - `make train_all` – run full offline pipeline with gates
+  - `make p1` … `make p6`, `make p8` – run a single phase + gate
+
 ## Phase P10 – Explanations (Integrated Gradients)
 - Generate: `python explain_p10.py run --decision-id <id> --out explain/<id>.json --window-npy /path/to/window.npy --ckpt models/gru_5m/fold0/best.pt --steps 32 --topk 10 --target 1`
 - API: `python explain_p10.py api --port 8081` then `GET /explain?id=<id>` (TTL 30 days)
