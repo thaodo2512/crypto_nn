@@ -98,6 +98,15 @@ services:
       "--glob", "data/features/5m/BTCUSDT/**/*.parquet",
       "--report", "reports/p2_bench_5m_80d.csv"
     ]
+  p2_check:
+    <<: *app
+    command: [
+      "python", "p2_check.py", "run",
+      "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--raw", "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--bench-csv", "reports/p2_bench_5m_80d.csv",
+      "--out-json", "reports/p2_check_5m_80d.json"
+    ]
   duck_view_feat:
     <<: *app
     command: [
