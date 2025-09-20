@@ -278,7 +278,7 @@ def run(
             # Conservative check: dataset has at least `window` consecutive rows and reasonable feature count
             F = len(use_cols)
             win_ok = (len(g) >= window) and (10 <= F <= 24)
-        if not win_ok:
+        if f.get("train") and not win_ok:
             # helpful debug
             try:
                 train_len = len(f.get("train", []))
