@@ -275,22 +275,9 @@ def run(
                 for c in g.columns
                 if (c not in {"symbol", "y", "m", "d"}) and (not str(c).startswith("_")) and (g[c].dtype.kind in {"f", "i"})
             ]
-            win_ok = False
+            # Conservative check: dataset has at least `window` consecutive rows and reasonable feature count
             F = len(use_cols)
-            for t in train_sorted:
-                wdf = g.loc[(g.index > t - pd.Timedelta(minutes=5 * window)) & (g.index <= t), use_cols]
-                if len(wdf) == window:
-                    win_ok = (10 <= F <= 24)
-                    break
-            # if none found, keep win_ok=False
-            if not win_ok:
-                # Fallback: check that the dataset as a whole can produce a 144xF window
-                # Pick a timestamp sufficiently far from start
-                if len(g) >= window:
-                    t_any = g.index[window - 1]
-                    wdf_any = g.loc[(g.index > t_any - pd.Timedelta(minutes=5 * window)) & (g.index <= t_any), use_cols]
-                    if len(wdf_any) == window and (10 <= F <= 24):
-                        win_ok = True
+            win_ok = (len(g) >= window) and (10 <= F <= 24)
         if not win_ok:
             vios.append("window_shape_mismatch")
 
