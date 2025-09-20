@@ -21,7 +21,8 @@ def main() -> None:
         print(json.dumps({"pass": False, "error": "P2:no features parquet found"}))
         sys.exit(1)
     # Count feature columns (exclude keys, flags allowed)
-    cols = [c for c in df.columns if c not in ("ts", "symbol")]
+    # Count only numeric feature columns, excluding keys and internal flags (_-prefixed)
+    cols = [c for c in df.columns if c not in ("ts", "symbol") and not str(c).startswith("_")]
     n = len(cols)
     # NaN
     nan_any = df[cols].isna().any().any()
@@ -33,4 +34,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
