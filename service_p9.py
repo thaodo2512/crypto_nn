@@ -81,6 +81,9 @@ class ModelSession:
                 self.sess = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
         else:
             self.sess = None
+        # ONNX IO names (Phase 8 spec): inputs -> probs
+        self.input_name = "inputs"
+        self.output_name = "probs"
 
     def predict_proba(self, win: np.ndarray) -> np.ndarray:
         # win: [W,F]
@@ -91,13 +94,17 @@ class ModelSession:
             p = softmax_np(logits / max(self.temperature, 1e-6)).squeeze(0)
             return p
         else:
-            logits = self.sess.run(["logits"], {"input": x})[0]
-            p = softmax_np(logits / max(self.temperature, 1e-6)).squeeze(0)
-            return p
+            # P8 ONNX already outputs probabilities
+            probs = self.sess.run([self.output_name], {self.input_name: x.astype(np.float16)})[0]
+            return probs.squeeze(0).astype(np.float32)
 
 
 def create_app(model: ModelSession, k_min: float, k_max: float, H: int, monitor: Optional[HealthMonitor] = None) -> FastAPI:
     api = FastAPI()
+
+    @api.get("/health")
+    def health() -> JSONResponse:
+        return JSONResponse({"ok": True})
 
     @api.post("/score")
     def score(payload: Dict[str, Any]) -> JSONResponse:
@@ -215,4 +222,3 @@ def monitor(tegrastats_log: str = typer.Option("logs/tegrastats.log", "--tegrast
 
 if __name__ == "__main__":
     app_cli()
-
