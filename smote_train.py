@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from typing import Dict, List, Tuple, Optional
 
 import numpy as np
@@ -38,10 +39,12 @@ def apply_per_fold(
 
     Returns class counts per fold before/after.
     """
+    logger = logging.getLogger("p4")
     out_counts: Dict[int, Dict[str, int]] = {}
     Path(out_root).mkdir(parents=True, exist_ok=True)
     # For mapping fold indices (built on features ts) to meta rows, use timestamp membership
     meta_ts = pd.to_datetime(meta["ts"], utc=True)
+    logger.info(f"[SMOTE] Applying per-fold (folds={len(folds)})...")
     for f in folds:
         fid = f["fold_id"]
         if ts_for_folds is None:
@@ -56,6 +59,7 @@ def apply_per_fold(
         X_aug, y_aug = smote_long_short_only(X_tr, y_tr, seed=seed)
         post_counts = {c: int((y_aug == c).sum()) for c in ["LONG", "SHORT", "WAIT"]}
         out_counts[fid] = {f"pre_{k}": v for k, v in pre_counts.items()} | {f"post_{k}": v for k, v in post_counts.items()}
+        logger.info(f"[SMOTE] fold={fid} pre={pre_counts} post={post_counts}")
         # Persist per fold
         fold_dir = Path(out_root) / str(fid)
         fold_dir.mkdir(parents=True, exist_ok=True)

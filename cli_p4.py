@@ -57,9 +57,11 @@ def iforest_train(
     logger = _setup_log()
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
+    typer.echo(f"[P4] IF gate: features rows={len(feat):,}, labels rows={len(lab):,}")
     # Make folds on features' ts
     ts = feat.sort_values(["symbol", "ts"])['ts']
     folds = make_purged_folds(ts, n_folds=folds_n, embargo='1D')
+    logger.info(f"Starting IF gate q={q} rolling_days={rolling_days} folds={folds_n}")
     mask_df = export_mask_per_fold(feat, lab, folds, q=q, rolling_days=rolling_days, seed=seed)
     # Persist mask as Parquet
     import pyarrow as pa
@@ -85,6 +87,7 @@ def smote_windows(
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
     mask_df = _read_parquet(mask)
+    typer.echo(f"[P4] SMOTE: features rows={len(feat):,}, labels rows={len(lab):,}, mask rows={len(mask_df):,}")
     # Join mask: keep only (ts,symbol) with keep=1 for their fold
     # Build folds on feats to get consistent train indices
     ts = feat.sort_values(["symbol", "ts"])['ts']
@@ -93,6 +96,7 @@ def smote_windows(
     # Filter labels to mask keep=1 overall
     lab = lab.merge(mask_df[mask_df["keep"] == 1][["ts", "symbol"]].drop_duplicates(), on=["ts", "symbol"], how="inner")
     X, y, meta = build_sequence_windows(feat, lab, W=W)
+    typer.echo(f"[P4] Windows built: X={X.shape} y={len(y)} meta={len(meta)}; applying SMOTE per fold...")
     if X.size == 0:
         raise typer.BadParameter("No windows created; consider reducing W")
     counts = apply_per_fold(X, y, meta, folds, out_root=out, seed=seed, ts_for_folds=ts)

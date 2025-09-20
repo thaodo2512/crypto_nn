@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Dict, Optional
+import logging
 
 import numpy as np
 import pandas as pd
@@ -42,10 +43,13 @@ def fit_if_rolling(
         raise ValueError("No numeric feature columns found for IsolationForest gate")
     out_rows = []
     win = pd.Timedelta(days=rolling_days)
+    logger = logging.getLogger("p4")
     for sym, grp in df.groupby("symbol", sort=False):
         g = grp.copy()
         ts = g["ts"]
         scores = np.full(len(g), np.nan, dtype=float)
+        logger.info(f"[IF] symbol={sym} rows={len(g)} window_days={rolling_days}")
+        step = max(1, len(g) // 20)
         for i in range(len(g)):
             t = ts.iat[i]
             mask = (ts < t) & (ts >= t - win)
@@ -61,6 +65,9 @@ def fit_if_rolling(
             thr = np.quantile(past_scores, q)
             keep = 1 if s <= thr else 0
             out_rows.append({"ts": t, "symbol": sym, "score": float(s), "keep": int(keep)})
+            if (i % step) == 0:
+                pct = (i + 1) / len(g)
+                logger.info(f"[IF] {sym} progress: {i+1}/{len(g)} ({pct:.0%})")
     return pd.DataFrame(out_rows)
 
 
@@ -74,6 +81,8 @@ def export_mask_per_fold(
 ) -> pd.DataFrame:
     """Run IF gate and merge with folds to form a mask per (ts, symbol, fold_id)."""
     df = features.merge(labels[["ts", "symbol", "label"]], on=["ts", "symbol"], how="inner")
+    logger = logging.getLogger("p4")
+    logger.info("[IF] Fitting rolling isolation forest and building mask per fold...")
     gate = fit_if_rolling(df, q=q, rolling_days=rolling_days, seed=seed)
     # Assign fold_id by ts position
     all_ts = df.sort_values(["symbol", "ts"]).reset_index(drop=True)["ts"]
@@ -85,5 +94,5 @@ def export_mask_per_fold(
         m = m.assign(fold_id=f["fold_id"]).loc[:, ["ts", "symbol", "keep", "fold_id"]]
         masks.append(m)
     mask_df = pd.concat(masks, ignore_index=True)
+    logger.info(f"[IF] Mask rows total={len(mask_df):,}")
     return mask_df
-
