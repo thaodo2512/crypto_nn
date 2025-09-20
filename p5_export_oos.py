@@ -103,7 +103,7 @@ def run(
     typer.echo(f"OOS probs written under {out}")
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def _default(
     ctx: typer.Context,
     features: str = typer.Option(None, "--features"),
