@@ -130,7 +130,7 @@ class FoldReport:
 def run(
     features: str = typer.Option(..., "--features"),
     labels: str = typer.Option(..., "--labels"),
-    folds_json: str = typer.Option(..., "--folds"),
+    folds_json: str = typer.Option(..., "--folds", help="Path to folds.json (canonical CV splits)"),
     models_glob: str = typer.Option(..., "--models"),
     oos_probs_glob: str = typer.Option(..., "--oos-probs"),
     train_log: str = typer.Option(..., "--train-log"),
@@ -140,6 +140,7 @@ def run(
     embargo: str = typer.Option("1D", "--embargo"),
     window: int = typer.Option(144, "--window"),
     mask: Optional[str] = typer.Option(None, "--mask"),
+    strict: bool = typer.Option(False, "--strict", help="Strict mode: require OOS per fold and use folds.json only"),
 ) -> None:
     violations_global: List[str] = []
 
@@ -150,28 +151,33 @@ def run(
         violations_global.append("missing_features_or_labels")
     ts_sorted = feat.sort_values(["symbol", "ts"])['ts'] if not feat.empty else pd.Series([], dtype='datetime64[ns, UTC]')
     # Folds
-    try:
+    if strict:
         if not Path(folds_json).exists():
-            raise FileNotFoundError(folds_json)
-        folds = _parse_folds_json(folds_json, ts_sorted)
-    except FileNotFoundError:
-        # Fallback: build folds from features ts; record a warning but do not hard-fail
+            violations_global.append("folds_json_missing")
+            folds = []
+        else:
+            folds = _parse_folds_json(folds_json, ts_sorted)
+    else:
         try:
-            from folds import make_purged_folds  # lazy import
+            if not Path(folds_json).exists():
+                raise FileNotFoundError(folds_json)
+            folds = _parse_folds_json(folds_json, ts_sorted)
+        except FileNotFoundError:
+            # Fallback: build folds from features ts; record a warning but do not hard-fail
+            try:
+                from folds import make_purged_folds  # lazy import
 
-            mf = make_purged_folds(ts_sorted, n_folds=5, embargo=embargo)
-            ts_list = list(pd.to_datetime(ts_sorted, utc=True))
-            folds = []
-            for f in mf:
-                tr = [ts_list[i] for i in f["train_idx"]]
-                vl = [ts_list[i] for i in f["val_idx"]]
-                oo = [ts_list[i] for i in f["oos_idx"]]
-                folds.append({"fold_id": int(f["fold_id"]), "train": tr, "val": vl, "oos": oo})
-            # store as internal warning but not in hard-fail list
-            warnings_fallback = True
-        except Exception:
-            folds = []
-            violations_global.append("folds_unavailable")
+                mf = make_purged_folds(ts_sorted, n_folds=5, embargo=embargo)
+                ts_list = list(pd.to_datetime(ts_sorted, utc=True))
+                folds = []
+                for f in mf:
+                    tr = [ts_list[i] for i in f["train_idx"]]
+                    vl = [ts_list[i] for i in f["val_idx"]]
+                    oo = [ts_list[i] for i in f["oos_idx"]]
+                    folds.append({"fold_id": int(f["fold_id"]), "train": tr, "val": vl, "oos": oo})
+            except Exception:
+                folds = []
+                violations_global.append("folds_unavailable")
     embargo_td = pd.to_timedelta(embargo)
 
     # Models and probs

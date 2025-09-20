@@ -266,7 +266,7 @@ services:
       "--train-log", "logs/p5_train.log",
       "--metrics", "reports/p5_cv_metrics.json",
       "--out-json", "reports/p5_validate.json",
-      "--tz", "UTC", "--embargo", "1D", "--window", "144"
+      "--tz", "UTC", "--embargo", "1D", "--window", "144", "--strict"
     ]
   p5_oos_export:
     <<: *app
@@ -276,5 +276,5 @@ services:
       "--labels", "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
       "--models-root", "models/gru_5m",
       "--out", "artifacts/p5_oos_probs",
-      "--embargo", "1D", "--folds", "5", "--window", "144"
+      "--embargo", "1D", "--folds", "5", "--window", "144", "--folds-json", "artifacts/folds.json"
     ]

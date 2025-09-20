@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import typer
 
 from cli_p5 import GRUClassifier, build_windows
+from meta.cv_splits import emit_folds_json
 from folds import make_purged_folds
 
 
@@ -37,29 +38,60 @@ def run(
     embargo: str = typer.Option("1D", "--embargo"),
     folds_n: int = typer.Option(5, "--folds"),
     window: int = typer.Option(144, "--window"),
+    folds_json: str = typer.Option("artifacts/folds.json", "--folds-json"),
 ) -> None:
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
     X, y, meta = build_windows(feat, lab, W=window)
     if X.shape[0] == 0:
         raise typer.BadParameter("No windows built; check inputs or window length")
-    ts_sorted = meta.sort_values("ts")["ts"]
-    folds = make_purged_folds(ts_sorted, n_folds=folds_n, embargo=embargo)
+    # Load canonical folds if provided; else build one (but don't skip folds)
+    folds_spec = None
+    try:
+        import json
+        if folds_json and Path(folds_json).exists():
+            folds_spec = json.load(open(folds_json, "r"))
+    except Exception:
+        folds_spec = None
+    if folds_spec is None:
+        ts_sorted = meta.sort_values("ts")["ts"]
+        folds = make_purged_folds(ts_sorted, n_folds=folds_n, embargo=embargo)
+        # Convert to spec-like dict using index windows
+        ts_list = list(pd.to_datetime(ts_sorted, utc=True))
+        folds_spec = {
+            "meta": {"window": window, "horizon": 36, "embargo_bars": 288, "n_folds": folds_n},
+            "folds": [
+                {
+                    "fold_id": int(f["fold_id"]),
+                    "train": [[ts_list[f["train_idx"][0]].isoformat(), ts_list[f["train_idx"][-1]].isoformat()]] if len(f["train_idx"]) else [],
+                    "val": [[ts_list[f["val_idx"][0]].isoformat(), ts_list[f["val_idx"][-1]].isoformat()]] if len(f["val_idx"]) else [],
+                    "oos": [[ts_list[f["oos_idx"][0]].isoformat(), ts_list[f["oos_idx"][-1]].isoformat()]] if len(f["oos_idx"]) else [],
+                }
+                for f in folds
+            ],
+        }
 
     # Standardize per fold using TRAIN stats, then emit OOS probs
     Path(out).mkdir(parents=True, exist_ok=True)
-    for f in folds:
+    for f in folds_spec["folds"]:
         fid = int(f["fold_id"])
-        # Map fold indices to meta ordering
-        meta_sorted = meta.sort_values("ts").reset_index(drop=True)
-        m_tr_ts = meta_sorted.iloc[f["train_idx"]]["ts"]
-        m_oo_ts = meta_sorted.iloc[f["oos_idx"]]["ts"]
-        sel_tr = meta["ts"].isin(set(m_tr_ts))
-        sel_oo = meta["ts"].isin(set(m_oo_ts))
+        # Build boolean masks by time spans
+        def mask_from_spans(spans):
+            if not spans:
+                return pd.Series(False, index=meta.index)
+            m = pd.Series(False, index=meta.index)
+            for s, e in spans:
+                sdt = pd.to_datetime(s, utc=True)
+                edt = pd.to_datetime(e, utc=True)
+                m = m | ((meta["ts"] >= sdt) & (meta["ts"] <= edt))
+            return m
+
+        sel_tr = mask_from_spans(f.get("train", []))
+        sel_oo = mask_from_spans(f.get("oos", []))
         tr_ids = np.where(sel_tr.to_numpy())[0]
         oo_ids = np.where(sel_oo.to_numpy())[0]
         if tr_ids.size == 0 or oo_ids.size == 0:
-            continue
+            raise typer.BadParameter(f"Empty TRAIN/OOS for fold {fid} – check folds.json eligibility")
         mu = X[tr_ids].mean(axis=(0, 1))
         std = X[tr_ids].std(axis=(0, 1))
         std[std == 0] = 1.0
@@ -100,7 +132,7 @@ def run(
             import pyarrow.parquet as pq
 
             pq.write_table(pa.Table.from_pandas(df, preserve_index=False), Path(out) / f"fold{fid}.parquet")
-    typer.echo(f"OOS probs written under {out}")
+        typer.echo(f"OOS probs written under {out}")
 
 
 @app.callback(invoke_without_command=True)

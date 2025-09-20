@@ -16,6 +16,7 @@ import torch.optim as optim
 import typer
 
 from folds import make_purged_folds
+from meta.cv_splits import emit_folds_json, BARS_PER_DAY
 
 
 app = typer.Typer(help="P5/P6 – Training + Calibration/Ensemble for 5m BTCUSDT")
@@ -240,6 +241,24 @@ def train(
     X, y, meta = build_windows(feat, lab, W=window)
     if X.shape[0] == 0:
         raise typer.BadParameter("No windows built; check inputs or window length")
+
+    # Emit canonical folds.json on eligible timeline for strict CV
+    try:
+        ts_sorted_all = feat.sort_values(["symbol", "ts"]).reset_index(drop=True)["ts"]
+        emit_folds_json(
+            ts=ts_sorted_all,
+            out_path="artifacts/folds.json",
+            tf="5m",
+            symbol=str(feat["symbol"].mode().iloc[0]) if not feat.empty else "BTCUSDT",
+            window=window,
+            horizon=36,
+            embargo_bars=BARS_PER_DAY,
+            n_folds=folds_n,
+            min_oos=BARS_PER_DAY,
+            val_bars=window,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to emit artifacts/folds.json: {e}")
 
     # Folds on label timestamps
     ts_sorted = meta.sort_values("ts")["ts"]
