@@ -11,9 +11,11 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
+    env_file:
+      - secrets/.env
     environment:
       - TF=${TF:-5m}
-    command: ["bash","-lc","poetry run ingest --symbols ${SYMS:-BTCUSDT} --days ${DAYS:-90}"]
+    command: ["bash","-lc","python ingest_cg_5m.py --symbol ${SYMS:-BTCUSDT} --tf ${TF:-5m} --days ${DAYS:-90} --slice-days 7 --out data/parquet/${TF:-5m}/${SYMS:-BTCUSDT}"]
 
   p2_features:
     profiles: ["train"]
@@ -25,7 +27,9 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
-    command: ["bash","-lc","poetry run features build --tf ${TF:-5m}"]
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python features_p2.py build --glob 'data/parquet/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --out 'data/features/${TF:-5m}/${SYMS:-BTCUSDT}' --warmup 8640 --winsor_low 0.01 --winsor_high 0.99"]
 
   p3_label:
     profiles: ["train"]
@@ -37,7 +41,9 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
-    command: ["bash","-lc","poetry run label triple-barrier --k 1.2 --H ${H:-36}"]
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python label_p3.py triple-barrier --features 'data/features/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --raw 'data/parquet/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --out 'data/labels/${TF:-5m}/${SYMS:-BTCUSDT}' --tf ${TF:-5m} --k 1.2 --H ${H:-36} --atr-window 14"]
 
   p4_sampling:
     profiles: ["train"]
@@ -49,7 +55,9 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
-    command: ["bash","-lc","poetry run iforest train --rolling 30d && poetry run iforest score --emit-alerts || poetry run sampling stratify --tf ${TF:-5m}"]
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python cli_p4.py iforest-train --features 'data/features/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --labels 'data/labels/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --out data/masks/ifgate_${TF:-5m}.parquet --q 0.995 --rolling-days 30 --seed 42 --folds 5 && python cli_p4.py smote-windows --features 'data/features/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --labels 'data/labels/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --mask data/masks/ifgate_${TF:-5m}.parquet --W ${WINDOW:-144} --out data/aug/train_smote --seed 42 --folds 5 && python cli_p4.py report-classmix --pre data/train --post data/aug/train_smote --out reports/p4_classmix.json"]
 
   p5_train:
     profiles: ["train"]
@@ -65,7 +73,9 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
-    command: ["bash","-lc","poetry run meta train --model gru --window ${WINDOW:-144} --cv walkforward --focal --tf ${TF:-5m}"]
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features 'data/features/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --labels 'data/labels/${TF:-5m}/${SYMS:-BTCUSDT}/y=*/m=*/d=*/part-*.parquet' --out models/gru_${TF:-5m} --seed 42 --folds 5"]
 
   p6_calibrate:
     profiles: ["train"]
@@ -77,7 +87,23 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
-    command: ["bash","-lc","poetry run meta calibrate --method temperature"]
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python cli_p5.py calibrate --probs 'artifacts/p5_oos_probs/*.parquet' --method temperature --out models/calib.json"]
+
+  p6_ensemble:
+    profiles: ["train"]
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python cli_p5.py ensemble --calib models/calib.json --probs 'artifacts/p5_oos_probs/*.parquet' --weight-by EV --out models/ensemble_5m.json --cost_bps 5"]
 
   p6_thresholds:
     profiles: ["train"]
@@ -89,7 +115,9 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
-    command: ["bash","-lc","poetry run meta thresholds grid --objective ev_per_trade --tf ${TF:-5m}"]
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python cli_p5.py tune-threshold --ensemble models/ensemble_5m.json --probs 'artifacts/p5_oos_probs/*.parquet' --grid '0.50:0.80:0.025' --cost bps:5 --out reports/p6_oos_summary.json"]
 
   p8_export:
     profiles: ["train"]
@@ -101,5 +129,6 @@ services:
       - ./artifacts:/workspace/artifacts
       - ./models:/workspace/models
       - ./reports:/workspace/reports
-    command: ["bash","-lc","poetry run export onnx --fp16 --window ${WINDOW:-144}"]
-
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","python -m app.export.cli_p8_export onnx --ckpt 'models/gru_${TF:-5m}/*/best.pt' --fp16 --out export/model_${TF:-5m}_fp16.onnx --preproc conf/preproc_5m.yaml --ensemble models/ensemble_5m.json --window ${WINDOW:-144} --sample 2048"]

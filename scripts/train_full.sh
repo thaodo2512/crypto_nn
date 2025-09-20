@@ -51,6 +51,7 @@ gate p5
 
 # P6
 run_service p6_calibrate
+run_service p6_ensemble
 run_service p6_thresholds
 gate p6
 
@@ -62,4 +63,3 @@ log "Training pipeline completed. Artifacts:"
 log " - models/: $(ls -1 models 2>/dev/null | wc -l) entries"
 log " - reports/: $(ls -1 reports 2>/dev/null | wc -l) entries"
 log " - export/:  $(ls -1 export 2>/dev/null | wc -l) entries"
-

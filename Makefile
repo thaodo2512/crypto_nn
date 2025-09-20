@@ -109,6 +109,7 @@ p5:
 
 p6:
 	docker compose -f docker-compose.train.yml --profile train run --rm p6_calibrate
+	docker compose -f docker-compose.train.yml --profile train run --rm p6_ensemble
 	docker compose -f docker-compose.train.yml --profile train run --rm p6_thresholds
 	python scripts/validators/p6_gate.py
 
