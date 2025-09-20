@@ -16,7 +16,7 @@ def main() -> None:
     glob_path = f"data/parquet/{tf}/{sym}/y=*/m=*/d=*/part-*.parquet"
     con = duckdb.connect()
     try:
-        df = con.execute(f"select ts, symbol, * except(ts, symbol) from read_parquet('{glob_path}') order by ts").df()
+        df = con.execute("select * from read_parquet(?) order by ts", [glob_path]).df()
     finally:
         con.close()
     if df.empty:
@@ -30,7 +30,8 @@ def main() -> None:
     present = df[(df["ts"] >= grid.min()) & (df["ts"] <= grid.max())]["ts"].unique()
     gap_ratio = 1 - (len(present) / max(1, len(grid)))
     # NaN ratio, impute flags if present
-    nan_any = df.isna().any().any()
+    value_cols = [c for c in df.columns if c not in ("ts", "symbol")]
+    nan_any = df[value_cols].isna().any().any()
     # acceptance
     ok = (gap_ratio <= 0.005) and (not nan_any)
     report = {"gap_ratio": float(gap_ratio), "nan_any": bool(nan_any), "pass": ok}
@@ -40,4 +41,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
