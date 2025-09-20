@@ -68,6 +68,21 @@ services:
     image: crypto_nn_train
     build: .
     working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m} --seed 42 --folds 5"]
+
+  p5_train_gpu:
+    profiles: ["train"]
+    image: crypto_nn_train
+    build: .
+    working_dir: /workspace
     gpus: all
     environment:
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
