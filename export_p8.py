@@ -124,3 +124,33 @@ def export_onnx(
 if __name__ == "__main__":
     app()
 
+
+@app.callback(invoke_without_command=True)
+def _default(
+    ctx: typer.Context,
+    ckpt: str = typer.Option(None, "--ckpt"),
+    fp16: bool = typer.Option(True, "--fp16/--fp32"),
+    out: str = typer.Option("export/model_5m_fp16.onnx", "--out"),
+    preproc: str = typer.Option(None, "--preproc"),
+    calib: str = typer.Option(None, "--calib"),
+    window: int = typer.Option(144, "--window"),
+    sample: int = typer.Option(16, "--sample"),
+) -> None:
+    """Allow running without explicit subcommand by forwarding to onnx export.
+
+    Supports both styles:
+      - python export_p8.py onnx --ckpt ...
+      - python export_p8.py --ckpt ...
+    """
+    if ctx.invoked_subcommand is None:
+        if not ckpt or not preproc or not calib:
+            raise typer.BadParameter("Missing required options --ckpt/--preproc/--calib; use --help for usage.")
+        export_onnx.callback(
+            ckpt=ckpt,
+            fp16=fp16,
+            out=out,
+            preproc=preproc,
+            calib=calib,
+            window=window,
+            sample=sample,
+        )  # type: ignore
