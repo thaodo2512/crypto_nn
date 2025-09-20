@@ -431,10 +431,12 @@ def ensemble(
         else:
             raise typer.BadParameter("Missing probabilities in OOS for ensembling")
         prob_folds[fid] = p
-    # Compute EV per fold at tau=0.5 (baseline)
+    # Compute EV per fold at tau=0.5 (baseline) using that fold's y
     evs = []
     for fid in folds:
-        ev = _ev_trade(prob_folds[fid], y, tau=0.5, cost_bps=cost_bps)
+        sub = oos[oos.get("fold_id", 0) == fid]
+        y_fold = sub["y"].to_numpy().astype(int)
+        ev = _ev_trade(prob_folds[fid], y_fold, tau=0.5, cost_bps=cost_bps)
         evs.append(max(ev, 0.0))
     evs = np.array(evs)
     if evs.sum() == 0:
