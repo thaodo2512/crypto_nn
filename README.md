@@ -160,6 +160,18 @@ out_dir: data/parquet/15m/BTCUSDT
 - Local: `python cli_p5.py train --model gru --window 144 --cv walkforward --embargo 1D \
   --features "data/features/5m/BTCUSDT/**/part-*.parquet" --labels "data/labels/5m/BTCUSDT/**/part-*.parquet" \
   --out models/gru_5m --seed 42`
+
+P5 Validation (artifacts)
+- Docker: `docker compose run --rm p5_validate`
+- Local: `python p5_validate.py run \
+  --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+  --labels   "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+  --folds artifacts/folds.json \
+  --models "models/gru_5m/fold*/best.pt" \
+  --oos-probs "artifacts/p5_oos_probs/fold*.parquet" \
+  --train-log logs/p5_train.log \
+  --metrics reports/p5_cv_metrics.json \
+  --out-json reports/p5_validate.json --tz UTC --embargo 1D --window 144`
 - Model: GRU(64,1), dropout=0.2, weight_decay=1e-4; loss: weighted CE with time-decay (≈0.98/day).
 - CV: purged walk-forward with 1-day embargo, deterministic seed; checkpoints per fold under `models/gru_5m/<fold>/best.pt`.
 - Metrics: `reports/p5_cv_metrics.json`; logs under `logs/p5_train.log`.

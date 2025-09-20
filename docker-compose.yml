@@ -254,3 +254,17 @@ services:
       "--seed", "42",
       "--folds", "5"
     ]
+  p5_validate:
+    <<: *app
+    command: [
+      "python", "p5_validate.py", "run",
+      "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--labels", "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--folds", "artifacts/folds.json",
+      "--models", "models/gru_5m/fold*/best.pt",
+      "--oos-probs", "artifacts/p5_oos_probs/fold*.parquet",
+      "--train-log", "logs/p5_train.log",
+      "--metrics", "reports/p5_cv_metrics.json",
+      "--out-json", "reports/p5_validate.json",
+      "--tz", "UTC", "--embargo", "1D", "--window", "144"
+    ]
