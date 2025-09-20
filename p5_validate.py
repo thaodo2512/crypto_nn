@@ -149,7 +149,28 @@ def run(
     if feat.empty or lab.empty:
         violations_global.append("missing_features_or_labels")
     ts_sorted = feat.sort_values(["symbol", "ts"])['ts'] if not feat.empty else pd.Series([], dtype='datetime64[ns, UTC]')
-    folds = _parse_folds_json(folds_json, ts_sorted)
+    # Folds
+    try:
+        if not Path(folds_json).exists():
+            raise FileNotFoundError(folds_json)
+        folds = _parse_folds_json(folds_json, ts_sorted)
+    except FileNotFoundError:
+        # Fallback: build folds from features ts, mark violation but proceed
+        try:
+            from folds import make_purged_folds  # lazy import
+
+            mf = make_purged_folds(ts_sorted, n_folds=5, embargo=embargo)
+            ts_list = list(pd.to_datetime(ts_sorted, utc=True))
+            folds = []
+            for f in mf:
+                tr = [ts_list[i] for i in f["train_idx"]]
+                vl = [ts_list[i] for i in f["val_idx"]]
+                oo = [ts_list[i] for i in f["oos_idx"]]
+                folds.append({"fold_id": int(f["fold_id"]), "train": tr, "val": vl, "oos": oo})
+            violations_global.append("folds_json_missing_fallback_used")
+        except Exception:
+            folds = []
+            violations_global.append("folds_unavailable")
     embargo_td = pd.to_timedelta(embargo)
 
     # Models and probs
@@ -349,4 +370,3 @@ def _main_cb(ctx: typer.Context) -> None:
 
 if __name__ == "__main__":
     app()
-
