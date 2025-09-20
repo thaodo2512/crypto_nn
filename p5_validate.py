@@ -330,23 +330,31 @@ def run(
         # 3) Window shape (reconstruct a sample window)
         win_ok = False
         if not feat.empty and f.get("train"):
-            # pick a train ts that has at least `window` bars of lookback
-            train_sorted = sorted(set(pd.to_datetime(f["train"], utc=True)))
             sym = str(feat["symbol"].mode().iloc[0])
             g = (
                 feat[feat["symbol"] == sym]
                 .set_index("ts")
                 .sort_index()
             )
-            # Exclude partition and flag columns from feature count
             use_cols = [
                 c
                 for c in g.columns
                 if (c not in {"symbol", "y", "m", "d"}) and (not str(c).startswith("_")) and (g[c].dtype.kind in {"f", "i"})
             ]
-            # Conservative check: dataset has at least `window` consecutive rows and reasonable feature count
             F = len(use_cols)
-            win_ok = (len(g) >= window) and (10 <= F <= 24)
+            tr = f.get("train", [])
+            # If spans form [[start,end]], ensure at least `window` rows exist inside any train span
+            if tr and isinstance(tr[0], (list, tuple)) and len(tr[0]) == 2:
+                for s, e in tr:
+                    sdt = pd.to_datetime(s, utc=True)
+                    edt = pd.to_datetime(e, utc=True)
+                    cnt = int(((g.index >= sdt) & (g.index <= edt)).sum())
+                    if cnt >= window and (10 <= F <= 24):
+                        win_ok = True
+                        break
+            else:
+                # Fallback: dataset-level check
+                win_ok = (len(g) >= window) and (10 <= F <= 24)
         if f.get("train") and not win_ok:
             # helpful debug
             try:
