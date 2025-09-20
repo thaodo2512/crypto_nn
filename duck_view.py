@@ -7,12 +7,7 @@ import typer
 app = typer.Typer(help="DuckDB view helper for P2 features")
 
 
-@app.command()
-def create_view(
-    glob: str = typer.Option("data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet", "--glob"),
-    view: str = typer.Option("feat_5m", "--view"),
-    db: str = typer.Option("meta/duckdb/p1.duckdb", "--db"),
-) -> None:
+def _create(db: str, glob: str, view: str) -> None:
     con = duckdb.connect(database=db)
     try:
         con.execute(f"CREATE OR REPLACE VIEW {view} AS SELECT * FROM read_parquet('{glob}')")
@@ -23,6 +18,25 @@ def create_view(
         con.close()
 
 
+@app.callback()
+def main(
+    ctx: typer.Context,
+    glob: str = typer.Option("data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet", "--glob"),
+    view: str = typer.Option("feat_5m", "--view"),
+    db: str = typer.Option("meta/duckdb/p1.duckdb", "--db"),
+) -> None:
+    if ctx.invoked_subcommand is None:
+        _create(db, glob, view)
+
+
+@app.command()
+def create_view(
+    glob: str = typer.Option("data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet", "--glob"),
+    view: str = typer.Option("feat_5m", "--view"),
+    db: str = typer.Option("meta/duckdb/p1.duckdb", "--db"),
+) -> None:
+    _create(db, glob, view)
+
+
 if __name__ == "__main__":
     app()
-
