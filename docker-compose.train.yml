@@ -15,7 +15,7 @@ services:
       - secrets/.env
     environment:
       - TF=${TF:-5m}
-    command: ["bash","-lc","python ingest_cg_5m.py --symbol ${SYMS:-BTCUSDT} --tf ${TF:-5m} --days ${DAYS:-90} --slice-days 7 --out data/parquet/${TF:-5m}/${SYMS:-BTCUSDT}"]
+    command: ["bash","-lc","sym=${SYMS:-BTCUSDT}; sym=${sym%%,*}; python ingest_cg_5m.py --symbol \"$sym\" --tf ${TF:-5m} --days ${DAYS:-90} --slice-days 7 --out data/parquet/${TF:-5m}/$sym"]
 
   p2_features:
     profiles: ["train"]
