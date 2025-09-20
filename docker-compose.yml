@@ -250,7 +250,7 @@ services:
   p8_export:
     <<: *app
     command: [
-      "python", "export_p8.py", "onnx",
+      "python", "export_p8.py",
       "--ckpt", "models/gru_5m/*/best.pt",
       "--fp16",
       "--out", "export/model_5m_fp16.onnx",
