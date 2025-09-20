@@ -469,7 +469,9 @@ def tune_threshold(
     folds = sorted(oos["fold_id"].unique()) if "fold_id" in oos else [0]
     y = oos["y"].to_numpy().astype(int)
     # Calibrated fold probs
-    P_list = []
+    # Concatenate calibrated probabilities and matching y across folds
+    P_blocks = []
+    y_blocks = []
     for fid in folds:
         sub = oos[oos.get("fold_id", 0) == fid]
         if any(c.startswith("logits_") for c in sub.columns):
@@ -482,9 +484,10 @@ def tune_threshold(
             p = sub[["p_wait","p_long","p_short"]].to_numpy()
         else:
             raise typer.BadParameter("Missing probabilities for threshold tuning")
-        w = float(weights.get(fid, 1.0 / max(len(folds), 1)))
-        P_list.append(w * p)
-    P_ens = np.sum(P_list, axis=0) if P_list else np.zeros((len(y), 3))
+        P_blocks.append(p)
+        y_blocks.append(sub["y"].to_numpy().astype(int))
+    P_ens = np.vstack(P_blocks) if P_blocks else np.zeros((0, 3))
+    y = np.concatenate(y_blocks) if y_blocks else np.array([], dtype=int)
 
     # Grid search tau
     start, end, step = [float(x) for x in grid.split(":")]
