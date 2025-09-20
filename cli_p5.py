@@ -112,9 +112,13 @@ def _train_fold(model_dir: Path, X: np.ndarray, y: np.ndarray, ts: pd.Series, tr
     opt = optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-4)
     ce = nn.CrossEntropyLoss(reduction="none")
 
-    # Standardize per feature using train set
-    mu = X[train_idx].mean(axis=(0, 1))
-    std = X[train_idx].std(axis=(0, 1))
+    # Standardize per feature using train set; if train is empty, fall back to global stats to avoid NaNs
+    if train_idx.size == 0:
+        mu = X.mean(axis=(0, 1))
+        std = X.std(axis=(0, 1))
+    else:
+        mu = X[train_idx].mean(axis=(0, 1))
+        std = X[train_idx].std(axis=(0, 1))
     std[std == 0] = 1.0
     Xn = (X - mu) / std
 
