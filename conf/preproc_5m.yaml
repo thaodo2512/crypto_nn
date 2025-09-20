@@ -1,0 +1,18 @@
+# Placeholder preprocessing spec for ONNX export parity tagging.
+# Populate with your live preprocessing parameters as needed.
+window: 144
+features:
+  - ret_5m
+  - ret_1h
+  - ret_4h
+  - hl_range
+  - co_ret
+  - vol_z
+  - oi_z
+  - fund_now_z
+  - cvd_diff_z
+  - perp_share_60m
+  - liq60_z
+  - rv_5m_z
+  - hour_of_week_sin
+  - hour_of_week_cos
