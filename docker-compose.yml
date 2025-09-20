@@ -134,6 +134,16 @@ services:
       "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
       "--report", "reports/p3_qa_5m_80d.json"
     ]
+  p3_validate:
+    <<: *app
+    command: [
+      "python", "label_validate.py", "run",
+      "--labels", "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--k", "1.2", "--H", "36", "--atr-window", "14", "--days", "80",
+      "--out-json", "reports/p3_validate_5m_80d.json",
+      "--raw", "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet"
+    ]
 
   # P6 – Calibration, Ensemble, Threshold Tuning
   p6_calibrate:

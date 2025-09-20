@@ -48,6 +48,7 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Local: `python label_p3.py triple-barrier --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --raw "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out "data/labels/5m/BTCUSDT" --tf 5m --k 1.2 --H 36 --atr_window 14`
 - Validate labels:
   - Docker: `docker compose run --rm labels_validate`
+  - Validator (acceptance gate + rulecheck): `docker compose run --rm p3_validate`
   - Local: `python label_p3.py validate --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --report reports/p3_qa_5m_80d.json`
 - Sample:
   - Local: `python label_p3.py sample --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --n 10`
