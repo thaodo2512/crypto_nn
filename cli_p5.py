@@ -360,6 +360,9 @@ def calibrate(
             # Convert probs to logits via inverse softmax (log)
             p = val[[c for c in val.columns if c.startswith("p_")]].to_numpy()
             logits = np.log(np.maximum(p, 1e-8))
+        elif set(["p_wait","p_long","p_short"]).issubset(set(val.columns)):
+            p = val[["p_wait","p_long","p_short"]].to_numpy()
+            logits = np.log(np.maximum(p, 1e-8))
         else:
             raise typer.BadParameter("Missing logits_ or p_ columns")
         yv = val["y"].to_numpy().astype(int)
@@ -421,8 +424,12 @@ def ensemble(
             logits = sub[[c for c in sub.columns if c.startswith("logits_")]].to_numpy()
             T = float(cal.get(str(fid), {}).get("temperature", 1.0))
             p = _softmax(logits, T=T)
-        else:
+        elif any(c.startswith("p_") for c in sub.columns):
             p = sub[[c for c in sub.columns if c.startswith("p_")]].to_numpy()
+        elif set(["p_wait","p_long","p_short"]).issubset(set(sub.columns)):
+            p = sub[["p_wait","p_long","p_short"]].to_numpy()
+        else:
+            raise typer.BadParameter("Missing probabilities in OOS for ensembling")
         prob_folds[fid] = p
     # Compute EV per fold at tau=0.5 (baseline)
     evs = []
@@ -467,8 +474,12 @@ def tune_threshold(
             logits = sub[[c for c in sub.columns if c.startswith("logits_")]].to_numpy()
             T = float(cal.get(str(fid), {}).get("temperature", 1.0))
             p = _softmax(logits, T=T)
-        else:
+        elif any(c.startswith("p_") for c in sub.columns):
             p = sub[[c for c in sub.columns if c.startswith("p_")]].to_numpy()
+        elif set(["p_wait","p_long","p_short"]).issubset(set(sub.columns)):
+            p = sub[["p_wait","p_long","p_short"]].to_numpy()
+        else:
+            raise typer.BadParameter("Missing probabilities for threshold tuning")
         w = float(weights.get(fid, 1.0 / max(len(folds), 1)))
         P_list.append(w * p)
     P_ens = np.sum(P_list, axis=0) if P_list else np.zeros((len(y), 3))

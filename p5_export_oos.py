@@ -88,6 +88,7 @@ def run(
 
         sel_tr = mask_from_spans(f.get("train", []))
         sel_oo = mask_from_spans(f.get("oos", []))
+        sel_val = mask_from_spans(f.get("val", []))
         tr_ids = np.where(sel_tr.to_numpy())[0]
         oo_ids = np.where(sel_oo.to_numpy())[0]
         if tr_ids.size == 0 or oo_ids.size == 0:
@@ -106,6 +107,29 @@ def run(
         net.load_state_dict(state.get("state_dict", state))
         net.eval()
         probs_rows: List[Dict] = []
+        # Validation split (optional but recommended for calibration)
+        if sel_val.to_numpy().any():
+            with torch.no_grad():
+                vidx = np.where(sel_val.to_numpy())[0]
+                bs = 256
+                for start in range(0, len(vidx), bs):
+                    sl = vidx[start : start + bs]
+                    xb = torch.tensor(Xn[sl], dtype=torch.float32)
+                    logits = net(xb)
+                    p = F.softmax(logits, dim=1).cpu().numpy()
+                    for k, idx in enumerate(sl):
+                        probs_rows.append(
+                            {
+                                "ts": meta.iloc[idx]["ts"],
+                                "symbol": meta.iloc[idx]["symbol"],
+                                "p_wait": float(p[k, 0]),
+                                "p_long": float(p[k, 1]),
+                                "p_short": float(p[k, 2]),
+                                "y": int(1 if str(lab.iloc[idx]["label"]).upper() == "LONG" else 2 if str(lab.iloc[idx]["label"]).upper() == "SHORT" else 0),
+                                "fold_id": fid,
+                                "split": "val",
+                            }
+                        )
         with torch.no_grad():
             bs = 256
             for start in range(0, len(oo_ids), bs):
