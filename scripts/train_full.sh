@@ -15,6 +15,11 @@ fi
 
 log() { echo "[train] $*"; }
 
+if [[ "${BUILD_ONCE:-1}" == "1" ]]; then
+  log "Building training image (once)..."
+  docker compose -f docker-compose.train.yml --profile train build
+fi
+
 run_service() {
   local svc="$1"; shift || true
   log "Running service: ${svc}"
@@ -30,35 +35,56 @@ gate() {
 
 mkdir -p logs reports artifacts export
 
+# Quick mode to reduce runtime
+if [[ "${QUICK:-0}" == "1" ]]; then
+  export DAYS=${DAYS:-7}
+  export SAMPLE=${SAMPLE:-512}
+  log "QUICK=1 enabled: DAYS=${DAYS} SAMPLE=${SAMPLE}"
+fi
+
 # P1
-run_service p1_ingest
-gate p1
+if [[ "${SKIP_P1:-0}" != "1" ]]; then
+  run_service p1_ingest
+  gate p1
+fi
 
 # P2
-run_service p2_features
-gate p2
+if [[ "${SKIP_P2:-0}" != "1" ]]; then
+  run_service p2_features
+  gate p2
+fi
 
 # P3
-run_service p3_label
-gate p3
+if [[ "${SKIP_P3:-0}" != "1" ]]; then
+  run_service p3_label
+  gate p3
+fi
 
 # P4
-run_service p4_sampling || true
-gate p4
+if [[ "${SKIP_P4:-0}" != "1" ]]; then
+  run_service p4_sampling || true
+  gate p4
+fi
 
 # P5
-run_service p5_train
-gate p5
+if [[ "${SKIP_P5:-0}" != "1" ]]; then
+  run_service p5_train
+  gate p5
+fi
 
 # P6
-run_service p6_calibrate
-run_service p6_ensemble
-run_service p6_thresholds
-gate p6
+if [[ "${SKIP_P6:-0}" != "1" ]]; then
+  run_service p6_calibrate
+  run_service p6_ensemble
+  run_service p6_thresholds
+  gate p6
+fi
 
 # P8
-run_service p8_export
-gate p8
+if [[ "${SKIP_P8:-0}" != "1" ]]; then
+  run_service p8_export
+  gate p8
+fi
 
 log "Training pipeline completed. Artifacts:"
 log " - models/: $(ls -1 models 2>/dev/null | wc -l) entries"

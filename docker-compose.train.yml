@@ -3,6 +3,7 @@
 services:
   p1_ingest:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
@@ -19,6 +20,7 @@ services:
 
   p2_features:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
@@ -33,6 +35,7 @@ services:
 
   p3_label:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
@@ -47,6 +50,7 @@ services:
 
   p4_sampling:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
@@ -61,6 +65,7 @@ services:
 
   p5_train:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     gpus: all
@@ -79,6 +84,7 @@ services:
 
   p6_calibrate:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
@@ -93,6 +99,7 @@ services:
 
   p6_ensemble:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
@@ -107,6 +114,7 @@ services:
 
   p6_thresholds:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
@@ -121,6 +129,7 @@ services:
 
   p8_export:
     profiles: ["train"]
+    image: crypto_nn_train
     build: .
     working_dir: /workspace
     volumes:
