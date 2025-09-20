@@ -17,8 +17,8 @@
 - P1 (ingest/QA/view): `docker compose run --rm ingest_5m | qa_5m | duckdb_view_5m`.
 - P2 (features): `docker compose run --rm features_build | features_validate | features_bench`.
 - P2 checker (summary gate): `docker compose run --rm p2_check` (emits `reports/p2_check_5m_80d.json`).
-- P3 (labels): `make p3_label`.
-- P4 (sampling): `make p4_sampling`.
+- P3 (labels): `docker compose run --rm labels_build` then `labels_validate` or `p3_validate`.
+- P4 (sampling): `docker compose run --rm p4_iforest | p4_smote | p4_classmix` (or `p4_pipeline`).
 - P5 (train): `make p5_train` (GRU, weighted CE, time-decay).
 - P6 (calibrate/ensemble/tune τ): `p6_calibrate`, `p6_ensemble`, `p6_tune_threshold` compose services.
 - P7 (policy): `python policy_p7.py decide --probs ... --atr ... --out decisions/`.

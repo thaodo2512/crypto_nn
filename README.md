@@ -75,7 +75,11 @@ Causal Transforms
   - SMOTE applies ONLY to TRAIN folds on LONG/SHORT windows (W=144 bars), never on WAIT or OOS/VAL.
   - Purged walk‑forward CV with 1‑day embargo between TRAIN and VAL/OOS.
   - Acceptance: WAIT share in TRAIN ≤ 60% for every fold; OOS untouched.
-- Docker (Makefile): `make p4_sampling`
+- Docker Compose:
+  - IF gate: `docker compose run --rm p4_iforest`
+  - SMOTE windows: `docker compose run --rm p4_smote`
+  - Class mix report: `docker compose run --rm p4_classmix`
+  - End-to-end: `docker compose run --rm p4_pipeline`
 - Local commands
   - IF gate: `python cli_p4.py iforest-train --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out data/masks/ifgate_5m.parquet --q 0.995 --rolling-days 30 --seed 42`
   - SMOTE windows: `python cli_p4.py smote-windows --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --mask data/masks/ifgate_5m.parquet --W 144 --out data/aug/train_smote --seed 42`

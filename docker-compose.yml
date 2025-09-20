@@ -145,6 +145,43 @@ services:
       "--raw", "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet"
     ]
 
+  # P4 – Sampling (IF gate + SMOTE)
+  p4_iforest:
+    <<: *app
+    command: [
+      "python", "cli_p4.py", "iforest-train",
+      "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--labels", "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--out", "data/masks/ifgate_5m.parquet",
+      "--q", "0.995", "--rolling-days", "30", "--seed", "42", "--folds", "5"
+    ]
+  p4_smote:
+    <<: *app
+    command: [
+      "python", "cli_p4.py", "smote-windows",
+      "--features", "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--labels", "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet",
+      "--mask", "data/masks/ifgate_5m.parquet",
+      "--W", "144",
+      "--out", "data/aug/train_smote",
+      "--seed", "42", "--folds", "5"
+    ]
+  p4_classmix:
+    <<: *app
+    command: [
+      "python", "cli_p4.py", "report-classmix",
+      "--pre", "data/train",
+      "--post", "data/aug/train_smote",
+      "--out", "reports/p4_classmix.json"
+    ]
+  p4_pipeline:
+    <<: *app
+    command: ["bash", "-lc", \
+      "python cli_p4.py iforest-train --features 'data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet' --labels 'data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet' --out data/masks/ifgate_5m.parquet --q 0.995 --rolling-days 30 --seed 42 --folds 5 && "
+      "python cli_p4.py smote-windows --features 'data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet' --labels 'data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet' --mask data/masks/ifgate_5m.parquet --W 144 --out data/aug/train_smote --seed 42 --folds 5 && "
+      "python cli_p4.py report-classmix --pre data/train --post data/aug/train_smote --out reports/p4_classmix.json"
+    ]
+
   # P6 – Calibration, Ensemble, Threshold Tuning
   p6_calibrate:
     <<: *app
