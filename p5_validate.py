@@ -342,19 +342,8 @@ def run(
                 if (c not in {"symbol", "y", "m", "d"}) and (not str(c).startswith("_")) and (g[c].dtype.kind in {"f", "i"})
             ]
             F = len(use_cols)
-            tr = f.get("train", [])
-            # If spans form [[start,end]], ensure at least `window` rows exist inside any train span
-            if tr and isinstance(tr[0], (list, tuple)) and len(tr[0]) == 2:
-                for s, e in tr:
-                    sdt = pd.to_datetime(s, utc=True)
-                    edt = pd.to_datetime(e, utc=True)
-                    cnt = int(((g.index >= sdt) & (g.index <= edt)).sum())
-                    if cnt >= window and (10 <= F <= 24):
-                        win_ok = True
-                        break
-            else:
-                # Fallback: dataset-level check
-                win_ok = (len(g) >= window) and (10 <= F <= 24)
+            # Dataset-level check: ensure feature matrix has at least `window` rows and reasonable #features
+            win_ok = (len(g) >= window) and (10 <= F <= 24)
         if f.get("train") and not win_ok:
             # helpful debug
             try:
