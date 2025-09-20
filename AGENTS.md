@@ -16,6 +16,7 @@
 ## Key Workflows (5m default)
 - P1 (ingest/QA/view): `docker compose run --rm ingest_5m | qa_5m | duckdb_view_5m`.
 - P2 (features): `docker compose run --rm features_build | features_validate | features_bench`.
+- P2 checker (summary gate): `docker compose run --rm p2_check` (emits `reports/p2_check_5m_80d.json`).
 - P3 (labels): `make p3_label`.
 - P4 (sampling): `make p4_sampling`.
 - P5 (train): `make p5_train` (GRU, weighted CE, time-decay).

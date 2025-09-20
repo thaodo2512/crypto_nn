@@ -120,20 +120,30 @@ def _label_symbol(g: pd.DataFrame, params: TBParams) -> pd.DataFrame:
 
 @app.command("triple-barrier")
 def triple_barrier(
-    features: str = typer.Option(..., "--features", help="Features Parquet glob with OHLC columns"),
+    features: str = typer.Option(..., "--features", help="Features Parquet glob (will be joined with raw if OHLC missing)"),
     out: str = typer.Option(..., "--out", help="Output labels root"),
     tf: str = typer.Option("5m", "--tf", help="Timeframe; must be 5m"),
     k: float = typer.Option(1.2, "--k"),
     H: int = typer.Option(36, "--H", help="Horizon in bars"),
     atr_window: int = typer.Option(14, "--atr_window"),
+    raw: Optional[str] = typer.Option(None, "--raw", help="Optional raw P1 Parquet glob to supply OHLC if features lack them"),
 ) -> None:
     if tf.lower() != "5m":
         raise typer.BadParameter("Only 5m timeframe is supported")
     cols_req = ["ts", "symbol", "open", "high", "low", "close"]
     df = _read_parquet_glob(features)
+    # If OHLC missing and raw provided, join OHLC from raw lake
+    need_join = any(c not in df.columns for c in ["open", "high", "low", "close"])
+    if need_join:
+        if not raw:
+            raise typer.BadParameter("Features lack OHLC and --raw not provided")
+        ohlc = _read_parquet_glob(raw, cols=["ts", "symbol", "open", "high", "low", "close"])
+        if ohlc.empty:
+            raise typer.BadParameter("Raw parquet empty or OHLC not found")
+        df = df.merge(ohlc, on=["ts", "symbol"], how="inner")
     missing = [c for c in cols_req if c not in df.columns]
     if missing:
-        raise typer.BadParameter(f"Missing required columns in features: {missing}")
+        raise typer.BadParameter(f"Missing required columns after join: {missing}")
     df = df.sort_values(["symbol", "ts"]).reset_index(drop=True)
     out_root = out.rstrip("/")
     Path(out_root).mkdir(parents=True, exist_ok=True)
@@ -216,4 +226,3 @@ def sample(
 
 if __name__ == "__main__":
     app()
-

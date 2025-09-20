@@ -31,11 +31,23 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Docker: `docker compose run --rm duck_view_feat`
   - Local: `python duck_view.py create-view --glob "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --view feat_5m --db meta/duckdb/p1.duckdb`
 
+### P2 Acceptance Checker (one-shot summary)
+- Docker (recommended): `docker compose run --rm p2_check`
+  - Writes `reports/p2_check_5m_80d.json` and a wide CSV table `reports/p2_check_5m_80d_table.csv`.
+  - Fails if: feature count not in [10,20], any NaN>0, any `_imputed_*` ratio>5%, or 5m gap ratio>0.5% (and if provided, ms_per_bar>50).
+- Local equivalent:
+  - `python p2_check.py run \
+     --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+     --raw "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" \
+     --bench-csv "reports/p2_bench_5m_80d.csv" \
+     --out-json "reports/p2_check_5m_80d.json"`
+
 ## Phase P3 – Triple-Barrier Labels (5m)
 - Build labels:
-  - Docker (Makefile): `make p3_label`
-  - Local: `python label_p3.py triple-barrier --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out "data/labels/5m/BTCUSDT" --tf 5m --k 1.2 --H 36 --atr_window 14`
+  - Docker: `docker compose run --rm labels_build` (or `make p3_label`)
+  - Local: `python label_p3.py triple-barrier --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --raw "data/parquet/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --out "data/labels/5m/BTCUSDT" --tf 5m --k 1.2 --H 36 --atr_window 14`
 - Validate labels:
+  - Docker: `docker compose run --rm labels_validate`
   - Local: `python label_p3.py validate --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --features "data/features/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --report reports/p3_qa_5m_80d.json`
 - Sample:
   - Local: `python label_p3.py sample --labels "data/labels/5m/BTCUSDT/y=*/m=*/d=*/part-*.parquet" --n 10`
