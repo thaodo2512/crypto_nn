@@ -284,7 +284,17 @@ def run(
                 train_len = len(f.get("train", []))
             except Exception:
                 train_len = 0
-            typer.echo(f"DEBUG fold{fid}: window_check len_g={len(g)} F={F} train_len={train_len}")
+            g_len = -1
+            try:
+                g_len = len(g)  # type: ignore[name-defined]
+            except Exception:
+                pass
+            fcnt = -1
+            try:
+                fcnt = F  # type: ignore[name-defined]
+            except Exception:
+                pass
+            typer.echo(f"DEBUG fold{fid}: window_check len_g={g_len} F={fcnt} train_len={train_len}")
             vios.append("window_shape_mismatch")
         # If no train timestamps are provided, treat window check as satisfied (nothing to verify per-fold)
         if not f.get("train"):
