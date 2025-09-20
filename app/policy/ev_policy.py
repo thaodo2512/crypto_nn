@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 from pathlib import Path
-import yaml
 
 import numpy as np
 import pandas as pd
@@ -29,6 +28,10 @@ def load_barrier_cfg(path: str = "conf/barrier.yaml") -> BarrierCfg:
     if not p.exists():
         return BarrierCfg()
     try:
+        try:
+            import yaml  # type: ignore
+        except Exception:
+            return BarrierCfg()
         data = yaml.safe_load(p.read_text()) or {}
         return BarrierCfg(
             horizon_bars=int(data.get("horizon_bars", 36)),
