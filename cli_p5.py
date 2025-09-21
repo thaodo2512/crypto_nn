@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import logging
 import math
 from dataclasses import dataclass
@@ -106,7 +107,19 @@ def _time_decay_weights(ts: pd.Series, lam_per_day: float = 0.98) -> np.ndarray:
     return w.astype(np.float32)
 
 
-def _train_fold(model_dir: Path, X: np.ndarray, y: np.ndarray, ts: pd.Series, train_idx: np.ndarray, val_idx: np.ndarray, class_weights: torch.Tensor, seed: int) -> Dict[str, float]:
+def _train_fold(
+    model_dir: Path,
+    X: np.ndarray,
+    y: np.ndarray,
+    ts: pd.Series,
+    train_idx: np.ndarray,
+    val_idx: np.ndarray,
+    class_weights: torch.Tensor,
+    seed: int,
+    X_train_override: np.ndarray | None = None,
+    y_train_override: np.ndarray | None = None,
+    use_time_decay: bool = True,
+) -> Dict[str, float]:
     device = torch.device("cpu")
     input_dim = X.shape[2]
     net = GRUClassifier(input_dim=input_dim).to(device)
@@ -123,12 +136,46 @@ def _train_fold(model_dir: Path, X: np.ndarray, y: np.ndarray, ts: pd.Series, tr
     std[std == 0] = 1.0
     Xn = (X - mu) / std
 
+    # If override provided, standardize those with same stats
+    if X_train_override is not None:
+        Xo = (X_train_override - mu) / std
+        yo = y_train_override if y_train_override is not None else None
+
     def run_epoch(idx: np.ndarray) -> Tuple[float, float]:
         net.train()
         total_loss = 0.0
         n = 0
         # Simple batching
         bs = 64
+        if X_train_override is not None and y_train_override is not None:
+            # Train on override dataset in chunks
+            N = len(Xo)
+            for start in range(0, N, bs):
+                sl = slice(start, min(start + bs, N))
+                xb = torch.tensor(Xo[sl], dtype=torch.float32, device=device)
+                yb = torch.tensor(yo[sl], dtype=torch.long, device=device)
+                logits = net(xb)
+                l = ce(logits, yb)
+                cw = class_weights[yb]
+                if use_time_decay:
+                    # No ts for SMOTE; default to 1.0 if override
+                    td = torch.ones_like(cw, dtype=torch.float32, device=device)
+                else:
+                    td = torch.ones_like(cw, dtype=torch.float32, device=device)
+                loss = (l * cw * td).mean()
+                opt.zero_grad(set_to_none=True)
+                loss.backward()
+                grad_ok = True
+                for p in net.parameters():
+                    if p.grad is not None and not torch.isfinite(p.grad).all():
+                        grad_ok = False
+                        break
+                if grad_ok:
+                    opt.step()
+                total_loss += float(loss.item()) * (sl.stop - sl.start)
+                n += (sl.stop - sl.start)
+            return total_loss / max(n, 1), 0.0
+        # Default: train on indices from original dataset
         for start in range(0, len(idx), bs):
             sl = idx[start : start + bs]
             xb = torch.tensor(Xn[sl], dtype=torch.float32, device=device)
@@ -137,7 +184,7 @@ def _train_fold(model_dir: Path, X: np.ndarray, y: np.ndarray, ts: pd.Series, tr
             # per-sample loss with class weights and time-decay
             l = ce(logits, yb)
             cw = class_weights[yb]
-            td = torch.tensor(_time_decay_weights(ts.iloc[sl]), dtype=torch.float32, device=device)
+            td = torch.tensor(_time_decay_weights(ts.iloc[sl]), dtype=torch.float32, device=device) if use_time_decay else torch.ones_like(cw, dtype=torch.float32, device=device)
             loss = (l * cw * td).mean()
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -226,6 +273,7 @@ def train(
     seed: int = typer.Option(42, "--seed"),
     folds_n: int = typer.Option(5, "--folds"),
     folds_out: str = typer.Option("artifacts/folds.json", "--folds-out"),
+    smote_dir: str | None = typer.Option(None, "--smote-dir", help="Use SMOTE-balanced windows from P4 per fold (directory with <fold>/train.parquet)"),
 ) -> None:
     logger = logging.getLogger("p5")
     Path("logs").mkdir(exist_ok=True)
@@ -293,7 +341,25 @@ def train(
         tr_ids = np.where(sel_tr.to_numpy())[0]
         vl_ids = np.where(sel_vl.to_numpy())[0]
         fold_dir = Path(out) / str(fid)
-        m = _train_fold(fold_dir, X, y, meta["ts"], tr_ids, vl_ids, class_weights, seed)
+        # Optionally override training data with SMOTE windows from P4
+        Xo = Yo = None
+        use_td = True
+        if smote_dir:
+            sm_dir = Path(smote_dir) / str(fid)
+            part = sm_dir / "train.parquet"
+            if part.exists():
+                df_sm = _read_parquet(str(part))
+                xcols = [c for c in df_sm.columns if c.startswith("x")]
+                xcols_sorted = sorted(xcols, key=lambda s: int(s[1:]) if s[1:].isdigit() else 0)
+                dims = len(xcols_sorted)
+                if dims % window != 0:
+                    raise typer.BadParameter(f"SMOTE dims {dims} not divisible by window={window}")
+                Fdim = dims // window
+                Xo = df_sm[xcols_sorted].to_numpy().reshape(-1, window, Fdim)
+                map_lbl = {"WAIT": 0, "LONG": 1, "SHORT": 2}
+                Yo = df_sm["y"].map(map_lbl).fillna(0).astype(int).to_numpy()
+                use_td = False  # synthetic windows lack timestamps
+        m = _train_fold(fold_dir, X, y, meta["ts"], tr_ids, vl_ids, class_weights, seed, X_train_override=Xo, y_train_override=Yo, use_time_decay=use_td)
         metrics_cv[str(fid)] = m
         logger.info(f"fold={fid} train_loss={m.get('train_loss', 0):.4f} val_loss={m.get('val_loss', 0):.4f}")
 
@@ -369,6 +435,7 @@ def calibrate(
     # Expect columns: fold_id, split in {val,oos}, y (int), and either logits_0..2 or p_0..2
     folds = sorted(df["fold_id"].unique()) if "fold_id" in df else [0]
     calib: Dict[str, Dict[str, float]] = {}
+    debug: Dict[str, Dict[str, float]] = {}
     for fid in folds:
         sub = df[df.get("fold_id", 0) == fid]
         val = sub[sub.get("split", "val") == "val"]
@@ -406,12 +473,35 @@ def calibrate(
                     bestT = float(T)
         pv = _softmax(logits, T=bestT)
         ece = _ece_top(pv, yv)
+        # Compute OOS ECE with this temperature if OOS present
+        sub_oos = sub[sub.get("split", "oos") == "oos"]
+        ece_oos = None
+        if not sub_oos.empty:
+            if any(c.startswith("logits_") for c in sub_oos.columns):
+                logits_o = sub_oos[[c for c in sub_oos.columns if c.startswith("logits_")]].to_numpy()
+                p_o = _softmax(logits_o, T=bestT)
+            elif any(c.startswith("p_") for c in sub_oos.columns):
+                p_o = sub_oos[[c for c in sub_oos.columns if c.startswith("p_")]].to_numpy()
+            elif set(["p_wait","p_long","p_short"]).issubset(set(sub_oos.columns)):
+                p_o = sub_oos[["p_wait","p_long","p_short"]].to_numpy()
+            else:
+                p_o = None
+            if p_o is not None:
+                y_o = sub_oos["y"].to_numpy().astype(int)
+                ece_oos = _ece_top(p_o, y_o)
         calib[str(fid)] = {"temperature": bestT, "ece_val": ece, "nll_val": bestNLL}
+        debug[str(fid)] = {"T": bestT, "ece_val": ece, "ece_oos": float(ece_oos) if ece_oos is not None else None, "val_rows": float(len(val)), "oos_rows": float(len(sub_oos))}
         typer.echo(f"[P6:calibrate] fold={fid} T={bestT:.3f} ece_val={ece:.3f} nll_val={bestNLL:.3f}")
     Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
         json.dump(calib, f, indent=2)
     typer.echo(f"Calibration saved to {out}")
+    # Write debug report alongside calib
+    try:
+        with open("reports/p6_calib_debug.json", "w") as f:
+            json.dump(debug, f, indent=2)
+    except Exception:
+        pass
 
 
 def _ev_trade(prob: np.ndarray, y: np.ndarray, tau: float, cost_bps: float) -> float:

@@ -74,7 +74,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json --smote-dir data/aug/train_smote/$$sym"]
 
   p5_train_gpu:
     profiles: ["train"]
@@ -93,7 +93,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json --smote-dir data/aug/train_smote/$$sym"]
 
   p5_train_gpu_jetson:
     profiles: ["train"]
@@ -112,7 +112,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json --smote-dir data/aug/train_smote/$$sym"]
 
   p6_calibrate:
     profiles: ["train"]
