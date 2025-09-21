@@ -302,4 +302,24 @@ gcp-one:
 	$(MAKE) gcp-wait-train; \
 	$(MAKE) gcp-pull; \
 	if [ "$${GCP_KEEP_VM:-0}" != "1" ]; then $(MAKE) gcp-destroy; if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-release-ip; fi; fi
+
+# ---- Custom remote training with parameters (no need to open interactive SSH) ----
+# Pass parameters as Make vars: SYMS, TF, WINDOW, H, DAYS, QUICK
+# Example (single symbol, 80 days):
+#   SYMS=ETHUSDT QUICK=0 DAYS=80 make gcp-train-remote GCP_NAME=test2
+# Example (multi-symbol):
+#   SYMS="BTCUSDT,ETHUSDT" QUICK=0 DAYS=80 make gcp-train-remote-multi GCP_NAME=test2
+
+.PHONY: gcp-train-remote gcp-train-remote-multi
+gcp-train-remote:
+	@set -euxo pipefail; \
+	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
+	echo "Remote training (compose) started with $$REMOTE_ENV"
+
+gcp-train-remote-multi:
+	@set -euxo pipefail; \
+	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"$$REMOTE_ENV bash ~/repo/scripts/train_multi.sh\\\"\"; else nohup sg docker -c \"$$REMOTE_ENV bash ~/repo/scripts/train_multi.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
+	echo "Remote multi-symbol training started with $$REMOTE_ENV"
 SHELL := /bin/bash
