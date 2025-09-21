@@ -90,5 +90,12 @@ def cli(
 
 
 if __name__ == "__main__":
+    # Allow both styles:
+    #  - python -m app.export.cli_p8_export onnx --ckpt ...
+    #  - python -m app.export.cli_p8_export --ckpt ...
+    # Some environments pass a literal 'onnx' which our Typer app may not treat
+    # as a subcommand; normalize by stripping it if present.
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "onnx":
+        sys.argv.pop(1)
     app()
-
