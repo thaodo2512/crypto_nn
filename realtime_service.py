@@ -32,6 +32,13 @@ from app.runtime.onnx_introspect import infer_io
 from app.runtime.throttle import Throttler
 from app.runtime.metrics import ScoreDecideSink, aggregate_metrics
 from policy_p7 import _ev_decision_row
+from utils_cg import write_parquet_daily_files
+
+# New imports for REST polling and transforms
+import httpx
+import pandas as pd
+from transforms import winsorize_causal, zscore_causal, encode_hour_of_week, safe_log1p
+import threading
 
 
 app_cli = typer.Typer(help="Phase 9 – Edge realtime service")
@@ -67,13 +74,15 @@ class RuntimeConfig:
     throttle_gpu_util_pct: float = 80.0
     throttle_temp_c: float = 70.0
     use_if_gate: bool = False
+    poll_interval_sec: int = 300
+    coinglass_base_url: str = "https://open-api-v4.coinglass.com/api"
 
 
 def load_runtime_config(path: str) -> RuntimeConfig:
     with open(path, "r") as f:
         cfg = yaml.safe_load(f)
     rt = cfg.get("runtime", cfg)
-    return RuntimeConfig(
+    rc = RuntimeConfig(
         symbols=list(rt.get("symbols", ["BTCUSDT"])),
         window=int(rt.get("window", 144)),
         model_path=str(rt.get("model_path", "./artifacts/export/model_5m_fp16.onnx")),
@@ -83,7 +92,10 @@ def load_runtime_config(path: str) -> RuntimeConfig:
         throttle_gpu_util_pct=float(rt.get("throttle_gpu_util_pct", 80)),
         throttle_temp_c=float(rt.get("throttle_temp_c", 70)),
         use_if_gate=bool(rt.get("use_if_gate", False)),
+        poll_interval_sec=int(rt.get("poll_interval_sec", 300)),
+        coinglass_base_url=str(rt.get("coinglass_base_url", "https://open-api-v4.coinglass.com/api")),
     )
+    return rc
 
 
 class FeatureWindowResolver:
@@ -113,11 +125,234 @@ class FeatureWindowResolver:
         }
         return X, aux
 
+    def fetch_tail_features_df(self, symbol: str, n: int) -> pd.DataFrame:
+        glob = self.features_glob_tpl.format(symbol=symbol)
+        con = duckdb.connect()
+        try:
+            df = con.execute(f"SELECT * FROM read_parquet('{glob}') WHERE symbol='{symbol}' ORDER BY ts").df()
+        finally:
+            con.close()
+        if df.empty:
+            raise RuntimeError("No features available")
+        return df.tail(max(1, n))
+
+
+class RawHistoryResolver:
+    """Fetch last raw bars from P1 Parquet to append with newest raw bar."""
+
+    def __init__(self, parquet_tpl: str = "data/parquet/5m/{symbol}/y=*/m=*/d=*/part-*.parquet") -> None:
+        self.parquet_tpl = parquet_tpl
+
+    def fetch_tail_raw(self, symbol: str, n: int = 200) -> pd.DataFrame:
+        glob = self.parquet_tpl.format(symbol=symbol)
+        con = duckdb.connect()
+        try:
+            df = con.execute(f"SELECT * FROM read_parquet('{glob}', union_by_name=true) WHERE symbol='{symbol}' ORDER BY ts").df()
+        finally:
+            con.close()
+        if df.empty:
+            return pd.DataFrame()
+        df["ts"] = pd.to_datetime(df["ts"], utc=True)
+        return df.tail(n).reset_index(drop=True)
+
+
+class CoinGlassClient:
+    def __init__(self, base_url: str, api_key: Optional[str]) -> None:
+        self.base = base_url.rstrip("/")
+        headers = {"accept": "application/json"}
+        if api_key:
+            headers["CG-API-KEY"] = api_key
+        self.client = httpx.Client(headers=headers, timeout=10.0)
+
+    def _get(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        url = f"{self.base}/{path.lstrip('/')}"
+        for i in range(3):
+            try:
+                r = self.client.get(url, params=params)
+                if r.status_code == 200:
+                    return r.json()
+            except Exception:
+                time.sleep(1.0 * (i + 1))
+        return {}
+
+    def fetch_latest_bar(self, symbol: str, exchange: str = "Binance") -> Optional[Dict[str, Any]]:
+        """Fetch the latest 5m futures OHLC and auxiliary fields. Best-effort parse."""
+        out: Dict[str, Any] = {"symbol": symbol}
+        # Price OHLC
+        j = self._get("futures/price/history", {"exchange": exchange, "symbol": symbol, "interval": "5m", "limit": 1})
+        try:
+            row = (j.get("data") or [{}])[0]
+            out.update({
+                "ts": pd.to_datetime(int(row.get("time")) , unit="ms", utc=True),
+                "open": float(row.get("open")),
+                "high": float(row.get("high")),
+                "low": float(row.get("low")),
+                "close": float(row.get("close")),
+                "volume": float(row.get("volume_usd", 0.0)),
+            })
+        except Exception:
+            return None
+        # OI aggregated history (close → oi_now)
+        j = self._get("futures/open-interest/aggregated-history", {"symbol": symbol, "interval": "5m", "limit": 1})
+        try:
+            r = (j.get("data") or [{}])[0]
+            out["oi_now"] = float(r.get("close"))
+        except Exception:
+            out["oi_now"] = np.nan
+        # Funding (oi-weight history)
+        j = self._get("futures/funding-rate/oi-weight-history", {"symbol": symbol, "interval": "5m", "limit": 1})
+        try:
+            r = (j.get("data") or [{}])[0]
+            out["funding_now"] = float(r.get("fundingRate", 0.0))
+        except Exception:
+            out["funding_now"] = np.nan
+        # Taker flows
+        j = self._get("futures/taker-buy-sell-volume/history", {"exchange": exchange, "symbol": symbol, "interval": "5m", "limit": 1})
+        try:
+            r = (j.get("data") or [{}])[0]
+            out["taker_buy_usd"] = float(r.get("buyVolumeUsd", 0.0))
+            out["taker_sell_usd"] = float(r.get("sellVolumeUsd", 0.0))
+        except Exception:
+            out["taker_buy_usd"] = 0.0; out["taker_sell_usd"] = 0.0
+        # Spot taker volumes (optional)
+        out.setdefault("spot_taker_buy_usd", 0.0)
+        out.setdefault("spot_taker_sell_usd", 0.0)
+        # Liq notional raw (optional)
+        out.setdefault("liq_notional_raw", 0.0)
+        return out
+
+
+def _align_to_5m(ts: pd.Timestamp) -> pd.Timestamp:
+    return (ts.floor("5min") + pd.Timedelta(minutes=5)).tz_localize("UTC") if ts.tzinfo else (ts.floor("5min") + pd.Timedelta(minutes=5)).tz_localize("UTC")
+
+
+def _compute_feature_row(raw_tail: pd.DataFrame, prev_feat_row: Optional[pd.Series]) -> Dict[str, float]:
+    """Compute a single feature row causally from raw history (last ~144 bars).
+    Fallback to previous row values for any feature we can't compute, to preserve schema.
+    """
+    df = raw_tail.copy()
+    df["ret_5m"] = np.log(df["close"]).diff().fillna(0.0)
+    df["ret_1h"] = df["ret_5m"].rolling(12, min_periods=1).sum()
+    df["ret_4h"] = df["ret_5m"].rolling(48, min_periods=1).sum()
+    df["hl_range"] = (df["high"] - df["low"]) / df["close"].replace(0, np.nan)
+    df["co_ret"] = np.log((df["close"] / df["open"]).replace(0, np.nan)).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+    # z-scores (use available window length causally)
+    w = min(len(df), 144)
+    df["vol_z"] = zscore_causal(safe_log1p(df["volume"]).fillna(0.0), window=w)
+    if "oi_now" in df:
+        df["oi_z"] = zscore_causal(safe_log1p(df["oi_now"]).fillna(0.0), window=w)
+    if "funding_now" in df:
+        df["fund_now_z"] = zscore_causal(df["funding_now"].fillna(0.0), window=w)
+    # liq60_z (if available)
+    if "liq_notional_raw" in df:
+        df["liq60"] = df["liq_notional_raw"].fillna(0.0).rolling(12, min_periods=1).sum()
+        df["liq60_z"] = zscore_causal(safe_log1p(df["liq60"]).fillna(0.0), window=w)
+    # rv_5m_z
+    df["rv_5m_z"] = zscore_causal((df["ret_5m"] ** 2).fillna(0.0), window=w)
+    # seasonality
+    sin_h, cos_h = encode_hour_of_week(pd.DatetimeIndex(df["ts"].values))
+    df["hour_of_week_sin"], df["hour_of_week_cos"] = sin_h, cos_h
+    feat_row = df.iloc[-1].to_dict()
+    # Merge with previous feature schema if present
+    out: Dict[str, float] = {}
+    if prev_feat_row is not None:
+        for c in prev_feat_row.index:
+            if c in ("ts", "symbol"):
+                continue
+            v = feat_row.get(c)
+            out[c] = float(v) if v is not None and np.isfinite(v) else float(prev_feat_row[c])
+    else:
+        # Emit computed subset only
+        for k in ("ret_5m","ret_1h","ret_4h","hl_range","co_ret","vol_z","oi_z","fund_now_z","liq60_z","rv_5m_z","hour_of_week_sin","hour_of_week_cos"):
+            if k in feat_row:
+                out[k] = float(feat_row[k])
+    return out
+
+
+class MicroBatchPoller(threading.Thread):
+    def __init__(self, cfg: RuntimeConfig, model: ModelSession, resolver: FeatureWindowResolver, raw_resolver: RawHistoryResolver, throttler: Throttler) -> None:
+        super().__init__(daemon=True)
+        self.cfg = cfg
+        self.model = model
+        self.resolver = resolver
+        self.raw_resolver = raw_resolver
+        self.throttler = throttler
+        self.client = CoinGlassClient(cfg.coinglass_base_url, os.getenv("COINGLASS_API_KEY"))
+        self.stop_evt = threading.Event()
+        self.sd_sink = ScoreDecideSink("logs/score_decide.jsonl")
+
+    def stop(self) -> None:
+        self.stop_evt.set()
+
+    def run(self) -> None:
+        while not self.stop_evt.is_set():
+            start = time.time()
+            for sym in self.cfg.symbols:
+                try:
+                    self.process_symbol(sym)
+                except Exception as e:
+                    self.sd_sink.append({"ts": _now_iso(), "type": "poll_error", "symbol": sym, "error": str(e)})
+            # sleep remaining
+            elapsed = time.time() - start
+            to_sleep = max(1, int(self.cfg.poll_interval_sec - elapsed))
+            if self.stop_evt.wait(to_sleep):
+                break
+
+    def process_symbol(self, symbol: str) -> None:
+        h = self.throttler.read()
+        if h.throttle:
+            # under throttle, skip or force WAIT
+            self.sd_sink.append({"ts": _now_iso(), "type": "throttle_skip", "symbol": symbol})
+            return
+        latest = self.client.fetch_latest_bar(symbol)
+        if not latest:
+            self.sd_sink.append({"ts": _now_iso(), "type": "no_data", "symbol": symbol})
+            return
+        latest_ts = _align_to_5m(latest["ts"]).to_pydatetime()
+        latest["ts"] = pd.Timestamp(latest_ts, tz="UTC")
+        # fetch raw history for features
+        raw = self.raw_resolver.fetch_tail_raw(symbol, n=self.cfg.window - 1)
+        if raw.empty:
+            self.sd_sink.append({"ts": _now_iso(), "type": "raw_empty", "symbol": symbol})
+            return
+        # limited ffill for exogenous from raw
+        for ex in ("oi_now", "funding_now"):
+            if ex in raw.columns and np.isnan(latest.get(ex, np.nan)):
+                latest[ex] = float(raw[ex].ffill(limit=3).iloc[-1]) if ex in raw else np.nan
+        raw_app = pd.concat([raw, pd.DataFrame([latest])], ignore_index=True)
+        # feature tail df and schema
+        feat_tail = self.resolver.fetch_tail_features_df(symbol, n=self.cfg.window - 1)
+        prev_feat_row = feat_tail.iloc[-1].drop(labels=[c for c in ("ts","symbol") if c in feat_tail.columns]) if not feat_tail.empty else None
+        feat_row = _compute_feature_row(raw_app.iloc[-self.cfg.window:], prev_feat_row)
+        # build full window array in training column order
+        cols = [c for c in feat_tail.columns if c not in ("ts", "symbol")] if not feat_tail.empty else list(feat_row.keys())
+        X_tail = feat_tail[cols].to_numpy(dtype=np.float32) if not feat_tail.empty else np.zeros((self.cfg.window - 1, len(cols)), dtype=np.float32)
+        x_new = np.array([feat_row.get(c, 0.0) for c in cols], dtype=np.float32)
+        X = np.vstack([X_tail, x_new])
+        # model → policy
+        t0 = time.perf_counter(); t_nn0 = time.perf_counter()
+        p = self.model.predict_proba(X)
+        t_nn_ms = (time.perf_counter() - t_nn0) * 1000
+        liq60_z = float(feat_row.get("liq60_z", 0.0))
+        liq60_pctile = float(np.clip((liq60_z + 5.0) / 10.0, 0.0, 1.0))
+        class Cost:
+            def __init__(self, bps: float) -> None: self.bps=bps
+            def cost_frac(self) -> float: return self.bps/1e4
+        cost = Cost(0.3 + 0.4 * liq60_pctile)
+        close = float(latest.get("close", 0.0)); atr_pct = float(feat_row.get("atr_pct", 0.005)); vol_pct = float(feat_row.get("vol_pctile", 0.5))
+        side, size, tp_px, sl_px, ev, reason = _ev_decision_row(float(p[1]), float(p[2]), close, atr_pct, 1.0, 1.5, vol_pct, cost)
+        t_total_ms = (time.perf_counter() - t0) * 1000
+        # write decision parquet partitioned by day
+        dec = pd.DataFrame([{ "ts": latest["ts"], "symbol": symbol, "side": side, "size": size, "TP_px": tp_px, "SL_px": sl_px, "EV": ev, "reason": reason }])
+        write_parquet_daily_files(dec, root="decisions", symbol=symbol)
+        self.sd_sink.append({"ts": _now_iso(), "type": "poll_decide", "symbol": symbol, "p_long": float(p[1]), "p_short": float(p[2]), "side": side, "t_nn_ms": t_nn_ms, "t_total_ms": t_total_ms})
+
 
 def build_api(model: ModelSession, cfg: RuntimeConfig) -> FastAPI:
     api = FastAPI()
     throttler = Throttler(thresh_temp=cfg.throttle_temp_c, thresh_gpu=cfg.throttle_gpu_util_pct)
     resolver = FeatureWindowResolver(cfg.features_glob, window=cfg.window)
+    raw_resolver = RawHistoryResolver()
     sd_sink = ScoreDecideSink("logs/score_decide.jsonl")
     recent = LRUSet(8192)
     key_locks: Dict[Tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -134,9 +369,14 @@ def build_api(model: ModelSession, cfg: RuntimeConfig) -> FastAPI:
             finally:
                 explain_q.task_done()
 
+    # Micro-batch poller (REST), optional
+    poller = MicroBatchPoller(cfg, model, resolver, raw_resolver, throttler)
+
     @api.on_event("startup")
     async def _startup() -> None:
         asyncio.create_task(_worker())
+        # Start REST poller
+        poller.start()
 
     @api.get("/health")
     def health() -> JSONResponse:
