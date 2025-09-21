@@ -1,0 +1,5 @@
+window: 144
+H: 36
+k_min: 1.0
+k_max: 1.5
+# Runtime config for P9 edge service. Extend as needed.

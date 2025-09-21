@@ -101,6 +101,16 @@ if [[ "${SKIP_P8:-0}" != "1" ]]; then
   gate p8
 fi
 
+## Optional: auto-deploy inference artifacts to Jetson if env is configured
+if [[ "${AUTO_DEPLOY:-1}" == "1" ]]; then
+  if [[ -n "${JETSON_HOST:-}" && -n "${JETSON_USER:-}" && -n "${JETSON_SSH_KEY:-}" && -n "${JETSON_REMOTE_ROOT:-}" ]]; then
+    log "Auto-deploy enabled; pushing model/data to Jetson ($JETSON_HOST)"
+    bash scripts/deploy_auto.sh || true
+  else
+    log "Auto-deploy skipped: Jetson env not set (.env)"
+  fi
+fi
+
 log "Training pipeline completed. Artifacts:"
 log " - models/: $(ls -1 models 2>/dev/null | wc -l) entries"
 log " - reports/: $(ls -1 reports 2>/dev/null | wc -l) entries"
