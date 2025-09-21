@@ -3,34 +3,36 @@ set -euxo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+echo "[startup] begin" | tee /dev/ttyS0 || true
+
+# Base tools for keyrings and downloads
 apt-get update
+apt-get install -y --no-install-recommends ca-certificates curl gnupg
+
+# Add Docker official APT repo (Docker CE + Compose v2 plugin)
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod a+r /etc/apt/keyrings/docker.asc
+
+ARCH=$(dpkg --print-architecture)
+CODENAME=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${CODENAME} stable" \
+  | tee /etc/apt/sources.list.d/docker.list >/dev/null
+
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Project runtime deps
 apt-get install -y --no-install-recommends \
   python3 python3-venv python3-pip \
-  git tmux rsync unzip curl \
-  build-essential docker.io || true
+  git tmux rsync unzip build-essential
 
-# Try to install compose via apt plugin first; fall back to GitHub binary if unavailable
-apt-get update || true
-if ! apt-get install -y --no-install-recommends docker-compose-plugin; then
-  echo "[startup] docker-compose-plugin not in repo; installing Compose v2 binary" | tee /dev/ttyS0 || true
-  COMPOSE_VER="v2.27.0"
-  mkdir -p /usr/local/lib/docker/cli-plugins
-  ARCH=$(uname -m)
-  case "$ARCH" in
-    x86_64|amd64) SUFFIX=linux-x86_64 ;;
-    aarch64|arm64) SUFFIX=linux-aarch64 ;;
-    *) SUFFIX=linux-x86_64 ;;
-  esac
-  curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
-    "https://github.com/docker/compose/releases/download/${COMPOSE_VER}/docker-compose-${SUFFIX}"
-  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-fi
-
-# Start Docker if present
+# Start Docker and print versions
 systemctl start docker || true
-docker --version || true
-docker compose version || true
+docker --version | tee /dev/ttyS0 || true
+docker compose version | tee /dev/ttyS0 || true
 
+# Workspace for artifacts
 mkdir -p /work/artifacts
 chmod -R 0777 /work || true
 
