@@ -336,21 +336,18 @@ gcp-one-multi:
 .PHONY: gcp-train-remote gcp-train-remote-multi gcp-train-remote-parallel gcp-wait-train-parallel gcp-one-parallel
 gcp-train-remote:
 	@set -euxo pipefail; \
-	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
-	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
-	echo "Remote training (compose) started with $$REMOTE_ENV"
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK) bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK) bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
+	echo "Remote training (compose) started with SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK)"
 
 gcp-train-remote-multi:
 	@set -euxo pipefail; \
-	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
-	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
-	echo "Remote multi-symbol training started with $$REMOTE_ENV"
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK) bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK) bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
+	echo "Remote multi-symbol training started with SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK)"
 
 gcp-train-remote-parallel:
 	@set -euxo pipefail; \
-	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
-	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; sg docker -c \"bash ~/repo/scripts/train_parallel.sh\"'"; \
-	echo "Remote parallel training launched with $$REMOTE_ENV"
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; sg docker -c \"SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK) bash ~/repo/scripts/train_parallel.sh\"'"; \
+	echo "Remote parallel training launched with SYMS=$(SYMS) TF=$(TF) WINDOW=$(WINDOW) H=$(H) DAYS=$(DAYS) QUICK=$(QUICK)"
 
 gcp-wait-train-parallel:
 	@set -euxo pipefail; \
