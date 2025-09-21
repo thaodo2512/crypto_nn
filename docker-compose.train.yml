@@ -1,5 +1,3 @@
- 
-
 services:
   p1_ingest:
     profiles: ["train"]
@@ -129,7 +127,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py calibrate --probs 'artifacts/p5_oos_probs/'"$$sym"'/*.parquet' --method temperature --out models/calib_"$$sym".json --verbose"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py calibrate --probs artifacts/p5_oos_probs/$$sym/*.parquet --method temperature --out models/calib_$$sym.json --verbose"]
 
   p6_ensemble:
     profiles: ["train"]
@@ -144,7 +142,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py ensemble --calib models/calib_"$$sym".json --probs 'artifacts/p5_oos_probs/'"$$sym"'/*.parquet' --weight-by EV --out models/ensemble_5m_"$$sym".json --cost_bps 5 --verbose"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py ensemble --calib models/calib_$$sym.json --probs artifacts/p5_oos_probs/$$sym/*.parquet --weight-by EV --out models/ensemble_5m_$$sym.json --cost_bps 5 --verbose"]
 
   p6_thresholds:
     profiles: ["train"]
@@ -159,7 +157,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py tune-threshold --ensemble models/ensemble_5m_"$$sym".json --probs 'artifacts/p5_oos_probs/'"$$sym"'/*.parquet' --grid 0.50:0.80:0.025 --cost bps:5 --out reports/p6_oos_summary_"$$sym".json --verbose"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py tune-threshold --ensemble models/ensemble_5m_$$sym.json --probs artifacts/p5_oos_probs/$$sym/*.parquet --grid 0.50:0.80:0.025 --cost bps:5 --out reports/p6_oos_summary_$$sym.json --verbose"]
 
   p5_oos_export:
     profiles: ["train"]
@@ -189,4 +187,5 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python -m app.export.cli_p8_export onnx --ckpt 'models/gru_${TF:-5m}/'"$$sym"'/*/best.pt' --fp16 --out export/model_${TF:-5m}_"$$sym"_fp16.onnx --preproc conf/preproc_5m.yaml --ensemble models/ensemble_5m_"$$sym".json --window ${WINDOW:-144} --sample 2048"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python -m app.export.cli_p8_export onnx --ckpt models/gru_${TF:-5m}/$$sym/*/best.pt --fp16 --out export/model_${TF:-5m}_$$sym_fp16.onnx --preproc conf/preproc_5m.yaml --ensemble models/ensemble_5m_$$sym.json --window ${WINDOW:-144} --sample 2048"]
+
