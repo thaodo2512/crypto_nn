@@ -10,6 +10,7 @@ apt-get install -y --no-install-recommends \
   build-essential docker.io || true
 
 # Try to install compose via apt plugin first; fall back to GitHub binary if unavailable
+apt-get update || true
 if ! apt-get install -y --no-install-recommends docker-compose-plugin; then
   echo "[startup] docker-compose-plugin not in repo; installing Compose v2 binary" | tee /dev/ttyS0 || true
   COMPOSE_VER="v2.27.0"
