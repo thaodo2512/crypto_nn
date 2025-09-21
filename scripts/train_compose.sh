@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-LOG=~/train.log
+LOG="${TRAIN_LOG:-$HOME/train.log}"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 ART_ROOT="/work/artifacts"
-RUN_DIR="${ART_ROOT}/run-${RUN_ID}"
-TARBALL="/work/artifacts-${RUN_ID}.tgz"
+RUN_SUFFIX="${RUN_SUFFIX:-}"
+if [[ -n "$RUN_SUFFIX" ]]; then
+  RUN_DIR="${ART_ROOT}/run-${RUN_ID}-${RUN_SUFFIX}"
+  TARBALL="/work/artifacts-${RUN_ID}-${RUN_SUFFIX}.tgz"
+else
+  RUN_DIR="${ART_ROOT}/run-${RUN_ID}"
+  TARBALL="/work/artifacts-${RUN_ID}.tgz"
+fi
 
 {
   echo "=== Compose Train start: ${RUN_ID} (UTC) ==="

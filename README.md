@@ -21,7 +21,9 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
 - One‑shot pipeline (create VM → wait readiness → push repo → Docker Compose train → wait → pull artifacts → optional destroy):
   - `make gcp-one GCP_NAME=train-$(date +%Y%m%d-%H%M%S)`
   - Parametrized single‑symbol: `SYMS=ETHUSDT QUICK=0 DAYS=80 make gcp-one-remote GCP_NAME=<name>`
-  - Parametrized multi‑symbol: `SYMS="BTCUSDT,ETHUSDT" QUICK=0 DAYS=80 TF=5m WINDOW=144 H=36 make gcp-one-multi GCP_NAME=<name>`
+- Parametrized multi‑symbol: `SYMS="BTCUSDT,ETHUSDT" QUICK=0 DAYS=80 TF=5m WINDOW=144 H=36 make gcp-one-multi GCP_NAME=<name>`
+  - Parallel per‑symbol (one tmux per symbol): `SYMS="BTCUSDT,ETHUSDT" QUICK=0 DAYS=80 TF=5m WINDOW=144 H=36 make gcp-one-parallel GCP_NAME=<name>`
+    - Sessions: `train_<SYMBOL>`; logs: `~/train_<SYMBOL>.log`; artifacts tarballs suffixed by symbol.
 - What it does under the hood:
   - Creates Ubuntu Minimal VM with startup‑script that installs Docker (official APT repo), Compose plugin, Python, git, tmux.
   - Startup prints `READY_FOR_REPO` to serial after setup. The make target waits for this gate.

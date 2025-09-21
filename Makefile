@@ -333,7 +333,7 @@ gcp-one-multi:
 # Example (multi-symbol):
 #   SYMS="BTCUSDT,ETHUSDT" QUICK=0 DAYS=80 make gcp-train-remote-multi GCP_NAME=test2
 
-.PHONY: gcp-train-remote gcp-train-remote-multi
+.PHONY: gcp-train-remote gcp-train-remote-multi gcp-train-remote-parallel gcp-wait-train-parallel gcp-one-parallel
 gcp-train-remote:
 	@set -euxo pipefail; \
 	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
@@ -345,4 +345,33 @@ gcp-train-remote-multi:
 	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
 	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
 	echo "Remote multi-symbol training started with $$REMOTE_ENV"
+
+gcp-train-remote-parallel:
+	@set -euxo pipefail; \
+	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; sg docker -c \"bash ~/repo/scripts/train_parallel.sh\"'"; \
+	echo "Remote parallel training launched with $$REMOTE_ENV"
+
+gcp-wait-train-parallel:
+	@set -euxo pipefail; \
+	SYMS_STR='$(SYMS)'; IFS=',' read -r -a A <<< "$$SYMS_STR"; expected=$${#A[@]}; \
+	echo "Waiting for $$expected artifact tarballs from parallel sessions..."; \
+	TIMEOUT_SEC=$${GCP_TIMEOUT:-21600}; ITER=$$(( (TIMEOUT_SEC + 9) / 10 )); \
+	for i in $$(seq 1 $$ITER); do \
+	  found=$$(gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'ls /work/artifacts-*.tgz 2>/dev/null | wc -l'" | tr -dc '0-9'); \
+	  echo "[$$i] found=$$found expected=$$expected"; \
+	  if [ "$${found:-0}" -ge "$$expected" ]; then echo "All artifacts present."; exit 0; fi; \
+	  sleep 10; \
+	done; echo "Timeout waiting for all parallel artifacts"; exit 1
+
+gcp-one-parallel:
+	@set -euxo pipefail; \
+	if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-create-with-ip; else $(MAKE) gcp-create; fi; \
+	$(MAKE) gcp-wait; \
+	$(MAKE) gcp-push; \
+	if [ "$${GCP_DOCKER_BUILD:-0}" = "1" ]; then $(MAKE) gcp-docker-build; fi; \
+	$(MAKE) gcp-train-remote-parallel; \
+	$(MAKE) gcp-wait-train-parallel; \
+	$(MAKE) gcp-pull; \
+	if [ "$${GCP_KEEP_VM:-0}" != "1" ]; then $(MAKE) gcp-destroy; if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-release-ip; fi; fi
 SHELL := /bin/bash
