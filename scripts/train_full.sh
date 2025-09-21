@@ -5,6 +5,12 @@ ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)
 cd "$ROOT_DIR"
 
 # Load env
+# Load defaults without clobbering pre-set env (SYMS/TF/WINDOW/H/DAYS)
+orig_SYMS="${SYMS:-}"
+orig_TF="${TF:-}"
+orig_WINDOW="${WINDOW:-}"
+orig_H="${H:-}"
+orig_DAYS="${DAYS:-}"
 if [[ -f scripts/.env.train ]]; then
   set -a; source scripts/.env.train; set +a
 elif [[ -f scripts/env.train ]]; then
@@ -12,6 +18,12 @@ elif [[ -f scripts/env.train ]]; then
 elif [[ -f scripts/env.train.example ]]; then
   set -a; source scripts/env.train.example; set +a
 fi
+# Restore any explicitly provided values
+if [[ -n "$orig_SYMS" ]]; then export SYMS="$orig_SYMS"; fi
+if [[ -n "$orig_TF" ]]; then export TF="$orig_TF"; fi
+if [[ -n "$orig_WINDOW" ]]; then export WINDOW="$orig_WINDOW"; fi
+if [[ -n "$orig_H" ]]; then export H="$orig_H"; fi
+if [[ -n "$orig_DAYS" ]]; then export DAYS="$orig_DAYS"; fi
 
 log() { echo "[train] $*"; }
 
