@@ -100,11 +100,18 @@ def smote_windows(
     if X.size == 0:
         raise typer.BadParameter("No windows created; consider reducing W")
     counts = apply_per_fold(X, y, meta, folds, out_root=out, seed=seed, ts_for_folds=ts)
-    # Build a 'pre' directory mirroring per-fold counts for reporting (minimal placeholder)
-    pre_dir = Path("data/train")
-    pre_dir.mkdir(parents=True, exist_ok=True)
-    with open(pre_dir / "counts.json", "w") as f:
+    # Write counts.json to generic path and per-symbol namespaced path (if single symbol)
+    pre_dir_generic = Path("data/train")
+    pre_dir_generic.mkdir(parents=True, exist_ok=True)
+    with open(pre_dir_generic / "counts.json", "w") as f:
         json.dump(counts, f)
+    # Also write to data/train/<symbol>/counts.json when a single symbol is present
+    syms = sorted(pd.Series(meta["symbol"].unique(), dtype=str).tolist()) if not meta.empty else []
+    if len(syms) == 1:
+        pre_dir_sym = Path("data/train") / syms[0]
+        pre_dir_sym.mkdir(parents=True, exist_ok=True)
+        with open(pre_dir_sym / "counts.json", "w") as f:
+            json.dump(counts, f)
     logger.info(f"SMOTE applied per fold to {out}")
     typer.echo("SMOTE windows completed.")
 
