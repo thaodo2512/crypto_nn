@@ -215,6 +215,23 @@ gcp-wait:
 	  sleep 5; \
 	done; echo "Timeout waiting for READY_FOR_REPO"; exit 1
 
+.PHONY: gcp-wait-verbose gcp-serial
+gcp-wait-verbose:
+	@set -euxo pipefail; \
+	echo "Waiting for READY_FOR_REPO with verbose serial output..."; \
+	for i in $$(seq 1 120); do \
+	  OUT=$$(gcloud compute instances get-serial-port-output "$(GCP_NAME)" --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" --port=1 --start=0 2>/dev/null || true); \
+	  echo "--- [Attempt $$i] Last 120 lines of serial ---"; echo "$$OUT" | tail -n 120; \
+	  echo "-------------------------------------------"; \
+	  if echo "$$OUT" | grep -q 'READY_FOR_REPO'; then echo "Instance is ready"; exit 0; fi; \
+	  sleep 5; \
+	done; echo "Timeout waiting for READY_FOR_REPO"; exit 1
+
+gcp-serial:
+	@set -euxo pipefail; \
+	LINES=$${LINES:-200}; \
+	gcloud compute instances get-serial-port-output "$(GCP_NAME)" --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" --port=1 --start=0 | tail -n $$LINES
+
 gcp-push:
 	@set -euxo pipefail; \
 	tar -czf /tmp/repo.tgz --exclude-from=.gcloudignore -C . .; \
