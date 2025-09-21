@@ -19,12 +19,12 @@
 - P2 checker (summary gate): `docker compose run --rm p2_check` (emits `reports/p2_check_5m_80d.json`).
 - P3 (labels): `docker compose run --rm labels_build` then `labels_validate` or `p3_validate`.
 - P4 (sampling): `docker compose run --rm p4_iforest | p4_smote | p4_classmix` (or `p4_pipeline`).
-- P5 (train): `docker compose run --rm p5_train` (writes models under `models/gru_5m`).
-- P5 (OOS export): `docker compose run --rm p5_oos_export` (writes `artifacts/p5_oos_probs/fold*.parquet`).
+- P5 (train): `docker compose run --rm p5_train` (writes models under `models/gru_5m/<SYMBOL>`).
+- P5 (OOS export): `docker compose run --rm p5_oos_export` (writes `artifacts/p5_oos_probs/<SYMBOL>/fold*.parquet`).
 - P5 (validate): `docker compose run --rm p5_validate` (checks ckpts, OOS probs, CV integrity, window shape, loss/time-decay hints).
-- P6 (calibrate/ensemble/tune τ): `p6_calibrate`, `p6_ensemble`, `p6_tune_threshold` compose services.
+- P6 (calibrate/ensemble/tune τ): `p6_calibrate`, `p6_ensemble`, `p6_tune_threshold` compose services. Outputs: `models/calib_<SYMBOL>.json`, `models/ensemble_5m_<SYMBOL>.json`, `reports/p6_oos_summary_<SYMBOL>.json`.
 - P7 (policy): `python policy_p7.py decide --probs ... --atr ... --out decisions/`.
-- P8 (export ONNX FP16): `docker compose run --rm p8_export`.
+- P8 (export ONNX FP16): `docker compose run --rm p8_export` → `export/model_5m_<SYMBOL>_fp16.onnx`.
 - P9 (service): `python service_p9.py api --onnx export/model_5m_fp16.onnx --port 8080`.
 - P10 (explain):
   - Generate: `python -m app.explain.cli run --decision-id <id> --window-npy <win.npy> --ckpt models/gru_5m/fold0/best.pt --onnx export/model_5m_fp16.onnx [--if-csv alerts.csv]`

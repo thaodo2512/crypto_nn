@@ -235,6 +235,22 @@ Export OOS probabilities (for validation/calibration)
   - `make train_all` – run full offline pipeline with gates
   - `make p1` … `make p6`, `make p8` – run a single phase + gate
 
+### Multi‑Symbol Training
+- Symbols are handled one‑at‑a‑time per run; outputs are now namespaced by symbol to avoid overwrites.
+- Namespaced outputs:
+  - Models: `models/gru_<tf>/<SYMBOL>/best.pt`
+  - OOS probs: `artifacts/p5_oos_probs/<SYMBOL>/fold*.parquet`
+  - IF mask: `data/masks/<tf>/<SYMBOL>/ifgate.parquet`
+  - Classmix report: `reports/p4_classmix_<SYMBOL>.json`
+  - Folds: `artifacts/folds_<SYMBOL>.json`
+  - P6: `models/calib_<SYMBOL>.json`, `models/ensemble_5m_<SYMBOL>.json`, `reports/p6_oos_summary_<SYMBOL>.json`
+  - P8: `export/model_<tf>_<SYMBOL>_fp16.onnx`
+- Run a single symbol (BTC):
+  - `SYMS=BTCUSDT TF=5m WINDOW=144 H=36 DAYS=90 bash scripts/train_full.sh`
+- Run multiple symbols sequentially:
+  - `SYMS="BTCUSDT,ETHUSDT" TF=5m WINDOW=144 H=36 DAYS=90 bash scripts/train_multi.sh`
+  - This loops symbols and runs `train_full.sh` per symbol; artifacts are written under each symbol.
+
 ## Phase P10 – Explanations (IG + optional IF‑SHAP)
 - Generate (parity‑guarded):
   - `python -m app.explain.cli run \
