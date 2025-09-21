@@ -391,11 +391,19 @@ def calibrate(
             typer.echo(f"[P6:calibrate] fold={fid} label_dist={_vc}")
         bestT = 1.0
         bestNLL = 1e9
-        for T in np.linspace(0.5, 5.0, 91):
-            nll = _nll(logits, yv, T)
+        grid1 = np.linspace(0.5, 5.0, 91)
+        for T in grid1:
+            nll = _nll(logits, yv, float(T))
             if nll < bestNLL:
                 bestNLL = nll
                 bestT = float(T)
+        # If the optimum is at the upper bound, extend search adaptively
+        if abs(bestT - grid1[-1]) < 1e-9:
+            for T in np.linspace(5.0, 10.0, 101):
+                nll = _nll(logits, yv, float(T))
+                if nll < bestNLL:
+                    bestNLL = nll
+                    bestT = float(T)
         pv = _softmax(logits, T=bestT)
         ece = _ece_top(pv, yv)
         calib[str(fid)] = {"temperature": bestT, "ece_val": ece, "nll_val": bestNLL}

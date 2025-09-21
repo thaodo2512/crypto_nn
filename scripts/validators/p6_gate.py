@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+import os
 
 import duckdb
 
@@ -25,9 +26,23 @@ def _count_oos_rows() -> int:
 
 
 def main() -> None:
-    summary_p = Path("reports/p6_oos_summary.json")
-    calib_p = Path("models/calib.json")
-    ens_p = Path("models/ensemble_5m.json")
+    # Prefer symbol-suffixed artifacts if present; otherwise use generic
+    sym = (os.environ.get("SYM") or (os.environ.get("SYMS") or "BTCUSDT").split(",")[0]).strip()
+    summary_candidates = [
+        Path(f"reports/p6_oos_summary_{sym}.json"),
+        Path("reports/p6_oos_summary.json"),
+    ]
+    calib_candidates = [
+        Path(f"models/calib_{sym}.json"),
+        Path("models/calib.json"),
+    ]
+    ens_candidates = [
+        Path(f"models/ensemble_5m_{sym}.json"),
+        Path("models/ensemble_5m.json"),
+    ]
+    summary_p = next((p for p in summary_candidates if p.exists()), summary_candidates[-1])
+    calib_p = next((p for p in calib_candidates if p.exists()), calib_candidates[-1])
+    ens_p = next((p for p in ens_candidates if p.exists()), ens_candidates[-1])
     if not summary_p.exists() or not calib_p.exists():
         print(json.dumps({"pass": False, "error": "P6:missing summary or calib", "have_summary": summary_p.exists(), "have_calib": calib_p.exists()}))
         sys.exit(1)
@@ -37,7 +52,8 @@ def main() -> None:
     e = _load_json(ens_p) if ens_p.exists() else {}
 
     ece = float(s.get("ece", 0.0)) if isinstance(s, dict) else 0.0
-    ev = float(s.get("ev_per_trade", 0.0)) if isinstance(s, dict) else 0.0
+    # Support either key name
+    ev = float(s.get("ev_per_trade", s.get("ev_trade", 0.0))) if isinstance(s, dict) else 0.0
     tau = float(s.get("best_tau", s.get("tau", 0.0))) if isinstance(s, dict) else 0.0
     n_oos = _count_oos_rows()
 
