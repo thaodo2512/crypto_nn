@@ -17,17 +17,41 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Explain P10: `python explain_p10.py api --port 8081`
   - Monitor P11: see Phase P11 commands below
 
-### Cloud Training (one command via gcloud + IAP)
-- One-shot pipeline (create → wait → push → optional Docker build → train → wait → pull → optional destroy):
+### Cloud Training (GCP, one command via gcloud + IAP)
+- One‑shot pipeline (create VM → wait readiness → push repo → Docker Compose train → wait → pull artifacts → optional destroy):
   - `make gcp-one GCP_NAME=train-$(date +%Y%m%d-%H%M%S)`
+- What it does under the hood:
+  - Creates Ubuntu Minimal VM with startup‑script that installs Docker (official APT repo), Compose plugin, Python, git, tmux.
+  - Startup prints `READY_FOR_REPO` to serial after setup. The make target waits for this gate.
+  - Pushes your local repo (respects `.gcloudignore`).
+  - Runs `scripts/train_compose.sh` on the VM: builds images, runs `scripts/train_full.sh` (QUICK=1 default), packages `/work/artifacts-*`.
+  - Pulls `/work/artifacts` and `/work/artifacts-*.tgz` to local `./artifacts/` and optionally deletes the VM.
 - Options:
   - Attach static IP: `GCP_USE_IP=1 make gcp-one`
   - Keep VM after run: `GCP_KEEP_VM=1 make gcp-one`
-  - Build Docker remotely if Dockerfile exists: `GCP_DOCKER_BUILD=1 make gcp-one`
-  - Timeout for training wait (seconds): `GCP_TIMEOUT=10800 make gcp-one`
-- Prereqs: install `gcloud`, login (`gcloud auth login`), and set defaults:
-  - `gcloud config set project valiant-epsilon-472304-r9 && gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-c`
-  - Ensure IAP tunneling is enabled and you have role `roles/iap.tunnelResourceAccessor`.
+  - (Optional) Build Docker remotely: `GCP_DOCKER_BUILD=1 make gcp-one`
+  - Training wait timeout (sec): `GCP_TIMEOUT=10800 make gcp-one`
+- Prereqs: install `gcloud`, login, set defaults:
+  - `gcloud auth login`
+  - `gcloud config set project valiant-epsilon-472304-r9`
+  - `gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-c`
+  - Enable APIs: `gcloud services enable compute.googleapis.com iap.googleapis.com`
+  - IAM: ensure role `roles/iap.tunnelResourceAccessor`
+- Useful helpers:
+  - Tail logs: `make gcp-tail GCP_NAME=<name>` (tails `~/train.log` on VM)
+  - Serial dump: `make gcp-serial GCP_NAME=<name>` (last 200 lines)
+  - Verbose wait: `make gcp-wait-verbose GCP_NAME=<name>` (prints serial while waiting for `READY_FOR_REPO`)
+  - SSH: `make gcp-ssh GCP_NAME=<name>`
+- Startup script location & debugging:
+  - Stored in instance metadata (`startup-script`). View: `gcloud compute instances describe <name> --format='get(metadata.items[?key==\`startup-script\`].value)'`
+  - Logs: `sudo journalctl -u google-startup-scripts -e` (on VM)
+  - If instance existed without the script: add and reboot:
+    - `gcloud compute instances add-metadata <name> --metadata-from-file startup-script=scripts/startup.sh`
+    - `gcloud compute instances reset <name>`
+  - Compose presence: `docker compose version` (printed to serial by startup)
+- GCP Make vars (override as needed):
+  - `GCP_PROJECT` (default `valiant-epsilon-472304-r9`), `GCP_REGION` (`us-central1`), `GCP_ZONE` (`us-central1-c`)
+  - `GCP_NAME` (instance name), `GCP_MACHINE` (`c2-standard-4`), `GCP_DISK` (`50`), `GCP_IMG` (Ubuntu Minimal image)
 
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
