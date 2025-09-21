@@ -303,6 +303,29 @@ gcp-one:
 	$(MAKE) gcp-pull; \
 	if [ "$${GCP_KEEP_VM:-0}" != "1" ]; then $(MAKE) gcp-destroy; if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-release-ip; fi; fi
 
+.PHONY: gcp-one-remote gcp-one-multi
+gcp-one-remote:
+	@set -euxo pipefail; \
+	if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-create-with-ip; else $(MAKE) gcp-create; fi; \
+	$(MAKE) gcp-wait; \
+	$(MAKE) gcp-push; \
+	if [ "$${GCP_DOCKER_BUILD:-0}" = "1" ]; then $(MAKE) gcp-docker-build; fi; \
+	$(MAKE) gcp-train-remote; \
+	$(MAKE) gcp-wait-train; \
+	$(MAKE) gcp-pull; \
+	if [ "$${GCP_KEEP_VM:-0}" != "1" ]; then $(MAKE) gcp-destroy; if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-release-ip; fi; fi
+
+gcp-one-multi:
+	@set -euxo pipefail; \
+	if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-create-with-ip; else $(MAKE) gcp-create; fi; \
+	$(MAKE) gcp-wait; \
+	$(MAKE) gcp-push; \
+	if [ "$${GCP_DOCKER_BUILD:-0}" = "1" ]; then $(MAKE) gcp-docker-build; fi; \
+	$(MAKE) gcp-train-remote-multi; \
+	$(MAKE) gcp-wait-train; \
+	$(MAKE) gcp-pull; \
+	if [ "$${GCP_KEEP_VM:-0}" != "1" ]; then $(MAKE) gcp-destroy; if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-release-ip; fi; fi
+
 # ---- Custom remote training with parameters (no need to open interactive SSH) ----
 # Pass parameters as Make vars: SYMS, TF, WINDOW, H, DAYS, QUICK
 # Example (single symbol, 80 days):
