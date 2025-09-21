@@ -1,33 +1,12 @@
 from __future__ import annotations
 
 """
-Phase 9 – Edge Realtime Service (Jetson‑friendly)
+Phase 9 – Edge Realtime Service for 5‑minute perps (Jetson‑friendly)
 
-This service exposes request/response APIs to return probabilities (/score) or
-decisions (/decide) using a small ONNX FP16 model. It does NOT poll exchanges.
-It expects a prepared 144×F feature window (+ ATR%) from a local store or via
-request body.
-
-Key features:
-- GPU provider selection (TensorRT → CUDA → CPU) with calibration guard
-- Jetson thermal/GPU throttling (tegrastats); fallback to LightGBM if present
-- Idempotent /decide with LRU de‑dup and per‑key ordering
-- Stage latency budgets (feat/nn/policy) and structured JSONL logging
-- Non‑blocking explain queue (stub) per decision_id
-- Optional DuckDB window resolver to fetch last 144 features
-- Poisson load test to verify SLA (p50<500ms, p99<2000ms)
-- Terminal UI (rich) to view last candles & signals (optional)
-
-Config (YAML):
-  runtime:
-    symbols: [BTCUSDT]
-    window: 144
-    model_path: export/model_5m_fp16.onnx
-    features_glob: data/features/5m/{symbol}/y=*/m=*/d=*/part-*.parquet
-    atr_parquet: data/atr_5m.parquet
-    latency_budget_sec: 600
-    throttle_gpu_util_pct: 80
-    throttle_temp_c: 70
+This service exposes request/response APIs to return probabilities (/score)
+or decisions (/decide) using a small ONNX FP16 model. It optionally resolves
+feature windows from a local store (DuckDB reading Parquet). It includes
+throttling, idempotency, non‑blocking explain queue, and a Poisson load tester.
 """
 
 import asyncio
@@ -87,6 +66,7 @@ class RuntimeConfig:
     latency_budget_sec: int = 600
     throttle_gpu_util_pct: float = 80.0
     throttle_temp_c: float = 70.0
+    use_if_gate: bool = False
 
 
 def load_runtime_config(path: str) -> RuntimeConfig:
@@ -96,12 +76,13 @@ def load_runtime_config(path: str) -> RuntimeConfig:
     return RuntimeConfig(
         symbols=list(rt.get("symbols", ["BTCUSDT"])),
         window=int(rt.get("window", 144)),
-        model_path=str(rt.get("model_path", "export/model_5m_fp16.onnx")),
+        model_path=str(rt.get("model_path", "./artifacts/export/model_5m_fp16.onnx")),
         features_glob=str(rt.get("features_glob", "data/features/5m/{symbol}/y=*/m=*/d=*/part-*.parquet")),
         atr_parquet=rt.get("atr_parquet"),
         latency_budget_sec=int(rt.get("latency_budget_sec", 600)),
         throttle_gpu_util_pct=float(rt.get("throttle_gpu_util_pct", 80)),
         throttle_temp_c=float(rt.get("throttle_temp_c", 70)),
+        use_if_gate=bool(rt.get("use_if_gate", False)),
     )
 
 
@@ -121,15 +102,14 @@ class FeatureWindowResolver:
             con.close()
         if df.empty or len(df) < self.window:
             raise RuntimeError("Not enough feature rows to build window")
-        # Select contiguous tail of window rows
         win_df = df.tail(self.window)
         cols = [c for c in win_df.columns if c not in ("ts", "symbol") and np.issubdtype(win_df[c].dtype, np.number)]
         X = win_df[cols].to_numpy(dtype=np.float32)
-        # Derive aux (fall back to reasonable defaults)
         aux = {
             "close": float(win_df.get("close", win_df[cols[0]]).iloc[-1]) if "close" in win_df.columns else 0.0,
             "atr_pct": float(win_df.get("atr_pct", 0.005).iloc[-1]) if "atr_pct" in win_df.columns else 0.005,
             "vol_pctile": float(win_df.get("vol_pctile", 0.5).iloc[-1]) if "vol_pctile" in win_df.columns else 0.5,
+            "liq60_z": float(win_df.get("liq60_z", 0.0).iloc[-1]) if "liq60_z" in win_df.columns else 0.0,
         }
         return X, aux
 
@@ -139,10 +119,8 @@ def build_api(model: ModelSession, cfg: RuntimeConfig) -> FastAPI:
     throttler = Throttler(thresh_temp=cfg.throttle_temp_c, thresh_gpu=cfg.throttle_gpu_util_pct)
     resolver = FeatureWindowResolver(cfg.features_glob, window=cfg.window)
     sd_sink = ScoreDecideSink("logs/score_decide.jsonl")
-    # Idempotency & order
     recent = LRUSet(8192)
     key_locks: Dict[Tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
-    # Explain queue
     explain_q: asyncio.Queue = asyncio.Queue(maxsize=2048)
     explain_state: Dict[str, str] = {}
 
@@ -180,12 +158,15 @@ def build_api(model: ModelSession, cfg: RuntimeConfig) -> FastAPI:
 
     @api.post("/score")
     async def score(payload: Dict[str, Any], request: Request) -> JSONResponse:
-        win = np.array(payload.get("window", []), dtype=np.float32)
+        symbol = str(payload.get("symbol", cfg.symbols[0]))
+        if "window" in payload:
+            win = np.array(payload.get("window"), dtype=np.float32)
+        else:
+            win, _ = resolver.fetch(symbol)
         if win.ndim != 2 or win.shape[0] != cfg.window:
             return JSONResponse({"error": f"window must be [W,F] with W={cfg.window}"}, status_code=400)
         t0 = time.perf_counter(); t_feat_ms = 0.0
         h = throttler.read()
-        # inference
         t_nn0 = time.perf_counter()
         p = model.predict_proba(win)
         t_nn_ms = (time.perf_counter() - t_nn0) * 1000
@@ -193,7 +174,8 @@ def build_api(model: ModelSession, cfg: RuntimeConfig) -> FastAPI:
         t_total_ms = (time.perf_counter() - t0) * 1000
         degraded = (t_nn_ms > 30.0)
         sd_sink.append({
-            "ts": _now_iso(), "type": "score", "t_feat_ms": t_feat_ms, "t_nn_ms": t_nn_ms, "t_policy_ms": t_policy_ms, "t_total_ms": t_total_ms,
+            "ts": _now_iso(), "type": "score", "symbol": symbol,
+            "t_feat_ms": t_feat_ms, "t_nn_ms": t_nn_ms, "t_policy_ms": t_policy_ms, "t_total_ms": t_total_ms,
             "throttled": h.throttle, "provider": model.provider, "request_id": request.headers.get("X-Request-ID", "")
         })
         return JSONResponse({
@@ -207,13 +189,14 @@ def build_api(model: ModelSession, cfg: RuntimeConfig) -> FastAPI:
     async def decide(payload: Dict[str, Any], request: Request) -> JSONResponse:
         symbol = str(payload.get("symbol", cfg.symbols[0]))
         ts_close = str(payload.get("ts", payload.get("candle_close_ts", "")))
-        # Resolve window
+        # Resolve window + aux
         if "window" in payload:
             win = np.array(payload.get("window"), dtype=np.float32)
             aux = {
                 "close": float(payload.get("close", 0.0)),
                 "atr_pct": float(payload.get("atr_pct", 0.0)),
                 "vol_pctile": float(payload.get("vol_pctile", 0.5)),
+                "liq60_z": float(payload.get("liq60_z", 0.0)),
             }
         else:
             win, aux = resolver.fetch(symbol, ts_close)
@@ -229,16 +212,21 @@ def build_api(model: ModelSession, cfg: RuntimeConfig) -> FastAPI:
                 return JSONResponse({"duplicate": True, "decision_id": decision_id})
             t0 = time.perf_counter(); t_feat_ms = 0.0
             h = throttler.read(); throttled = h.throttle
-            # inference (fallback to LGBM under throttle if available)
+            # NN (fallback to LGBM under throttle if available)
             t_nn0 = time.perf_counter()
             if throttled and model.has_lgbm():
                 p = model.predict_proba_lgbm(win)
             else:
                 p = model.predict_proba(win)
             t_nn_ms = (time.perf_counter() - t_nn0) * 1000
-            # policy
+            # Policy with slippage (bps) based on liq60_z percentile
+            liq60_pctile = float(np.clip((aux.get("liq60_z", 0.0) + 5.0) / 10.0, 0.0, 1.0))  # crude mapping from z to pctile
+            class Cost:  # dynamic cost bps = 0.3 + 0.4 * liq60_pctile
+                def __init__(self, bps: float) -> None: self.bps=bps
+                def cost_frac(self) -> float: return self.bps/1e4
+            cost = Cost(0.3 + 0.4 * liq60_pctile)
             side, size, tp_px, sl_px, ev, reason = _ev_decision_row(
-                float(p[1]), float(p[2]), float(aux["close"]), float(aux["atr_pct"]), 1.0, 1.5, float(aux["vol_pctile"]), type("C", (), {"cost_frac": lambda self: 0.0005})()
+                float(p[1]), float(p[2]), float(aux["close"]), float(aux["atr_pct"]), 1.0, 1.5, float(aux["vol_pctile"]), cost
             )
             # throttle cushion τ+0.05
             tau = 0.5
@@ -319,7 +307,7 @@ def loadtest(
 
 @app_cli.command("terminal")
 def terminal(conf: str = typer.Option("conf/runtime.yaml", "--conf"), refresh: int = typer.Option(300, "--refresh")) -> None:
-    """Simple terminal UI to display latest candles + decisions (reads features)."""
+    """Simple terminal UI to display latest signals (reads features store)."""
     try:
         from rich.console import Console
         from rich.table import Table
@@ -331,7 +319,6 @@ def terminal(conf: str = typer.Option("conf/runtime.yaml", "--conf"), refresh: i
         try:
             X, aux = resolver.fetch(cfg.symbols[0])
             close = aux.get("close", 0.0)
-            # Dummy signal coloring based on mock probability
             rng = np.random.default_rng()
             p_long = float(rng.uniform()); p_short = float(1.0 - p_long); side = "LONG" if p_long >= p_short else "SHORT"
             if Console:
@@ -349,4 +336,3 @@ def terminal(conf: str = typer.Option("conf/runtime.yaml", "--conf"), refresh: i
 
 if __name__ == "__main__":
     app_cli()
-
