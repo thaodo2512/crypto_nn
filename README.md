@@ -17,6 +17,29 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Explain P10: `python explain_p10.py api --port 8081`
   - Monitor P11: see Phase P11 commands below
 
+## Phase P9 – Realtime Service (GPU‑aware, no polling)
+- Start API (local CPU/GPU):
+  - `python service_p9.py api --onnx export/model_5m_fp16.onnx --window 144 --port 8080`
+  - Health: `GET /health` → provider (TensorRT/CUDA/CPU), checksum, is_calibrated, throttle, queue depth
+  - Endpoints:
+    - `POST /score` → `{p_long,p_short,p_wait,provider,throttled,t_*}`
+    - `POST /decide` → `{decision_id,side,size,TP_px,SL_px,EV,reason,provider,throttled,t_*}`
+    - `GET /explain/status?id=<decision_id>` → `{state:queued|done|not_found}`
+  - SLA budgets: feat≤20 ms, nn≤30 ms, policy≤10 ms. Responses include `degraded` + `exceed_stage` if breached.
+  - Idempotency: duplicate `/decide` (same symbol/ts/window) returns `{duplicate:true}` and does not re‑process.
+- Throttling (Jetson):
+  - Background tegrastats watcher; throttle when temp≥THERM_TEMP (70°C default) or gpu_util≥THERM_GPU (80%).
+  - Under throttle: `/score` marks `throttled=true`; `/decide` forces WAIT if max_prob < (τ_side + 0.05), or falls back to LightGBM if present.
+  - Logs: `ops/tegrastats.csv` records transitions.
+- Load test (Poisson):
+  - `python service_p9.py loadtest --onnx export/model_5m_fp16.onnx --window 144 --rate 12 --duration 10m --out reports/p9_latency.json`
+  - Mixed traffic (80% /score, 20% /decide). PASS if p50<500 ms and p99<2 s.
+- Artifacts written:
+  - `logs/score_decide.jsonl` (structured per call), `logs/queue_explain.jsonl` (non‑blocking explain queue), `ops/tegrastats.csv`.
+  - Idempotency demo: `reports/e2e_idempotency.md`.
+
+Note: P9 does not poll exchanges. It expects a prepared 144×F window (+ ATR%). Push a window in the request or wire P9 to read the last 144 rows from a local DuckDB view if only `{symbol,ts}` is provided.
+
 ### Cloud Training (GCP, one command via gcloud + IAP)
 - One‑shot pipeline (create VM → wait readiness → push repo → Docker Compose train → wait → pull artifacts → optional destroy):
   - `make gcp-one GCP_NAME=train-$(date +%Y%m%d-%H%M%S)`
