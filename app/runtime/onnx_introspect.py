@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import onnx
 
@@ -37,3 +37,11 @@ def infer_io(onnx_path: str, expect_window: int = 144) -> int:
         raise RuntimeError("Feature dimension must be static and > 0")
     return int(feat)
 
+
+def available_providers() -> List[str]:
+    try:
+        import onnxruntime as ort  # type: ignore
+
+        return list(ort.get_available_providers())
+    except Exception:
+        return ["CPUExecutionProvider"]
