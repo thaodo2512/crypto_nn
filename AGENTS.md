@@ -26,7 +26,10 @@
 - P7 (policy): `python policy_p7.py decide --probs ... --atr ... --out decisions/`.
 - P8 (export ONNX FP16): `docker compose run --rm p8_export`.
 - P9 (service): `python service_p9.py api --onnx export/model_5m_fp16.onnx --port 8080`.
-- P10 (explain): `python explain_p10.py run ...` and `api --port 8081`.
+- P10 (explain):
+  - Generate: `python -m app.explain.cli run --decision-id <id> --window-npy <win.npy> --ckpt models/gru_5m/fold0/best.pt --onnx export/model_5m_fp16.onnx [--if-csv alerts.csv]`
+  - API: `python -m app.explain.cli api --port 8081 --dir explain` (or `docker compose run --rm -p 8081:8081 p10_explain_api`)
+  - GC: `python -m app.explain.cli gc --dir explain --ttl-days 30`
 - P11 (monitor): `python monitor_p11.py run ...` and `regimes` then `retrain`.
 
 ## Data & Storage

@@ -260,6 +260,17 @@ services:
       "--sample", "2048"
     ]
 
+  # P10 – Explanations (Integrated Gradients)
+  p10_explain_api:
+    <<: *app
+    ports:
+      - "8081:8081"
+    command: [
+      "python", "-m", "app.explain.cli", "api",
+      "--port", "8081",
+      "--dir", "explain"
+    ]
+
   # P5 – Small NN training (GRU)
   p5_train:
     <<: *app

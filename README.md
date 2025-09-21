@@ -235,10 +235,22 @@ Export OOS probabilities (for validation/calibration)
   - `make train_all` – run full offline pipeline with gates
   - `make p1` … `make p6`, `make p8` – run a single phase + gate
 
-## Phase P10 – Explanations (Integrated Gradients)
-- Generate: `python explain_p10.py run --decision-id <id> --out explain/<id>.json --window-npy /path/to/window.npy --ckpt models/gru_5m/fold0/best.pt --steps 32 --topk 10 --target 1`
-- API: `python explain_p10.py api --port 8081` then `GET /explain?id=<id>` (TTL 30 days)
-- Output JSON: `{window, features, topk[{t,f,attr}], summary}` and `reports/p10_sample.json`.
+## Phase P10 – Explanations (IG + optional IF‑SHAP)
+- Generate (parity‑guarded):
+  - `python -m app.explain.cli run \
+     --decision-id <id> \
+     --window-npy /path/to/window.npy \
+     --ckpt models/gru_5m/fold0/best.pt \
+     --onnx export/model_5m_fp16.onnx \
+     --steps 32 --topk 10 --target 1 [--baseline zeros|feature_means]`
+  - Optional IF‑SHAP at alert time: add `--if-csv alerts.csv` (expects columns: id, alert=1).
+- API (TTL 30 days):
+  - `python -m app.explain.cli api --port 8081 --dir explain`
+  - Endpoints: `GET /health`, `HEAD/GET /explain?id=<id>`
+- GC: `python -m app.explain.cli gc --dir explain --ttl-days 30`
+- JSON schema stored at `explain/<id>.json`:
+  - `{ id, ts_unix, window_shape:[144,F], features:[...], topk:[{t,f,attr}], summary:{sum,l1,l2,max_abs}, if_shap:[{f,shap}]? }`
+  - Atomic writes; expired files get 404 and are removed by GC.
 
 ## Phase P11 – Monitoring, Drift, Regimes, Retrain
 - Drift + metrics: `python monitor_p11.py run --features "data/features/5m/**/part-*.parquet" --decisions "decisions/**/part-*.parquet" --out reports/`
