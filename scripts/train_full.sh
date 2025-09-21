@@ -85,6 +85,8 @@ if [[ "${SKIP_P5:-0}" != "1" ]]; then
   # Auto-export OOS probabilities for Phase 6 inputs
   log "Exporting OOS probabilities for calibration/ensemble..."
   run_service p5_oos_export
+  # Validate exporter artifacts needed for calibration (logits + splits)
+  gate p5_calib
 fi
 
 # P6
