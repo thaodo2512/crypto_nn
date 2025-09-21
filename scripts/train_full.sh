@@ -67,14 +67,16 @@ if [[ "${SKIP_P4:-0}" != "1" ]]; then
 fi
 
 # P5
-has_gpu() {
-  if command -v nvidia-smi >/dev/null 2>&1; then return 0; fi
-  docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -qi nvidia && return 0 || return 1
-}
+has_nvidia_smi() { command -v nvidia-smi >/dev/null 2>&1; }
+has_nvidia_runtime() { docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -qi nvidia; }
 
 if [[ "${SKIP_P5:-0}" != "1" ]]; then
   svc=p5_train
-  if has_gpu; then svc=p5_train_gpu; fi
+  if has_nvidia_smi; then
+    svc=p5_train_gpu
+  elif has_nvidia_runtime; then
+    svc=p5_train_gpu_jetson
+  fi
   log "Selecting P5 service: ${svc}"
   run_service "${svc}"
   gate p5
