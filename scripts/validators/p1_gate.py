@@ -16,7 +16,11 @@ def main() -> None:
     glob_path = f"data/parquet/{tf}/{sym}/y=*/m=*/d=*/part-*.parquet"
     con = duckdb.connect()
     try:
-        df = con.execute("select * from read_parquet(?) order by ts", [glob_path]).df()
+        # Some days may have fewer columns. union_by_name aligns schemas across files.
+        df = con.execute(
+            "select * from read_parquet(?, union_by_name=true) order by ts",
+            [glob_path],
+        ).df()
     finally:
         con.close()
     if df.empty:
