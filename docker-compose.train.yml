@@ -161,6 +161,21 @@ services:
       - secrets/.env
     command: ["bash","-lc","python cli_p5.py tune-threshold --ensemble models/ensemble_5m.json --probs 'artifacts/p5_oos_probs/*.parquet' --grid 0.50:0.80:0.025 --cost bps:5 --out reports/p6_oos_summary.json"]
 
+  p5_oos_export:
+    profiles: ["train"]
+    image: crypto_nn_train
+    build: .
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - ./data:/workspace/data
+      - ./artifacts:/workspace/artifacts
+      - ./models:/workspace/models
+      - ./reports:/workspace/reports
+    env_file:
+      - secrets/.env
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python p5_export_oos.py run --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --models-root models/gru_${TF:-5m} --out artifacts/p5_oos_probs --embargo 1D --folds 5 --window ${WINDOW:-144} --folds-json artifacts/folds.json"]
+
   p8_export:
     profiles: ["train"]
     image: crypto_nn_train

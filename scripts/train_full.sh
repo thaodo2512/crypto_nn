@@ -80,6 +80,9 @@ if [[ "${SKIP_P5:-0}" != "1" ]]; then
   log "Selecting P5 service: ${svc}"
   run_service "${svc}"
   gate p5
+  # Auto-export OOS probabilities for Phase 6 inputs
+  log "Exporting OOS probabilities for calibration/ensemble..."
+  run_service p5_oos_export
 fi
 
 # P6
