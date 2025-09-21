@@ -277,12 +277,12 @@ gcp-tensorboard:
 #  - GCP_TIMEOUT=SECONDS to bound training wait (default 7200)
 gcp-one:
 	@set -euxo pipefail; \
-	if [ "$$GCP_USE_IP" = "1" ] 2>/dev/null; then $(MAKE) gcp-create-with-ip; else $(MAKE) gcp-create; fi; \
+	if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-create-with-ip; else $(MAKE) gcp-create; fi; \
 	$(MAKE) gcp-wait; \
 	$(MAKE) gcp-push; \
-	if [ "$$GCP_DOCKER_BUILD" = "1" ] 2>/dev/null; then $(MAKE) gcp-docker-build; fi; \
+	if [ "$${GCP_DOCKER_BUILD:-0}" = "1" ]; then $(MAKE) gcp-docker-build; fi; \
 	$(MAKE) gcp-train; \
 	$(MAKE) gcp-wait-train; \
 	$(MAKE) gcp-pull; \
-	if [ "$$GCP_KEEP_VM" != "1" ] 2>/dev/null; then $(MAKE) gcp-destroy; if [ "$$GCP_USE_IP" = "1" ] 2>/dev/null; then $(MAKE) gcp-release-ip; fi; fi
+	if [ "$${GCP_KEEP_VM:-0}" != "1" ]; then $(MAKE) gcp-destroy; if [ "$${GCP_USE_IP:-0}" = "1" ]; then $(MAKE) gcp-release-ip; fi; fi
 SHELL := /bin/bash
