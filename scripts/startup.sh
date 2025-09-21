@@ -7,7 +7,7 @@ apt-get update
 apt-get install -y --no-install-recommends \
   python3 python3-venv python3-pip \
   git tmux rsync unzip \
-  build-essential docker.io
+  build-essential docker.io docker-compose-plugin
 
 # Start Docker if present
 systemctl start docker || true
@@ -19,4 +19,3 @@ echo "READY_FOR_REPO" >/dev/ttyS0 || true
 logger -t startup "READY_FOR_REPO"
 
 exit 0
-
