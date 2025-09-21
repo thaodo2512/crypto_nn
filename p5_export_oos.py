@@ -93,6 +93,25 @@ def run(
         oo_ids = np.where(sel_oo.to_numpy())[0]
         if tr_ids.size == 0 or oo_ids.size == 0:
             raise typer.BadParameter(f"Empty TRAIN/OOS for fold {fid} – check folds.json eligibility")
+        # If VAL selection is empty, synthesize a small validation region just before OOS with an embargo gap
+        if not sel_val.to_numpy().any():
+            try:
+                emb_td = pd.to_timedelta(embargo)
+            except Exception:
+                emb_td = pd.to_timedelta("1D")
+            oos_start_ts = meta.iloc[oo_ids[0]]["ts"]
+            cutoff = oos_start_ts - emb_td
+            # take up to 144 decision rows before cutoff
+            window_minutes = 5 * 144
+            val_mask = (meta["ts"] <= cutoff) & (meta["ts"] > cutoff - pd.Timedelta(minutes=window_minutes))
+            if not val_mask.any() and tr_ids.size:
+                # fall back: last up to 144 from train indices
+                keep = int(min(144, tr_ids.size))
+                vidx = tr_ids[-keep:]
+            else:
+                vidx = np.where(val_mask.to_numpy())[0]
+        else:
+            vidx = np.where(sel_val.to_numpy())[0]
         mu = X[tr_ids].mean(axis=(0, 1))
         std = X[tr_ids].std(axis=(0, 1))
         std[std == 0] = 1.0
@@ -107,16 +126,16 @@ def run(
         net.load_state_dict(state.get("state_dict", state))
         net.eval()
         probs_rows: List[Dict] = []
-        # Validation split (optional but recommended for calibration)
-        if sel_val.to_numpy().any():
+        # Validation split (ensure present for calibration)
+        if vidx.size > 0:
             with torch.no_grad():
-                vidx = np.where(sel_val.to_numpy())[0]
                 bs = 256
                 for start in range(0, len(vidx), bs):
                     sl = vidx[start : start + bs]
                     xb = torch.tensor(Xn[sl], dtype=torch.float32)
                     logits = net(xb)
                     p = F.softmax(logits, dim=1).cpu().numpy()
+                    log_np = logits.cpu().numpy()
                     for k, idx in enumerate(sl):
                         probs_rows.append(
                             {
@@ -125,6 +144,9 @@ def run(
                                 "p_wait": float(p[k, 0]),
                                 "p_long": float(p[k, 1]),
                                 "p_short": float(p[k, 2]),
+                                "logits_0": float(log_np[k, 0]),
+                                "logits_1": float(log_np[k, 1]),
+                                "logits_2": float(log_np[k, 2]),
                                 "y": int(1 if str(lab.iloc[idx]["label"]).upper() == "LONG" else 2 if str(lab.iloc[idx]["label"]).upper() == "SHORT" else 0),
                                 "fold_id": fid,
                                 "split": "val",
@@ -137,6 +159,7 @@ def run(
                 xb = torch.tensor(Xn[sl], dtype=torch.float32)
                 logits = net(xb)
                 p = F.softmax(logits, dim=1).cpu().numpy()
+                log_np = logits.cpu().numpy()
                 for k, idx in enumerate(sl):
                     probs_rows.append(
                         {
@@ -145,6 +168,9 @@ def run(
                             "p_wait": float(p[k, 0]),
                             "p_long": float(p[k, 1]),
                             "p_short": float(p[k, 2]),
+                            "logits_0": float(log_np[k, 0]),
+                            "logits_1": float(log_np[k, 1]),
+                            "logits_2": float(log_np[k, 2]),
                             "y": int(1 if str(lab.iloc[idx]["label"]).upper() == "LONG" else 2 if str(lab.iloc[idx]["label"]).upper() == "SHORT" else 0),
                             "fold_id": fid,
                             "split": "oos",
