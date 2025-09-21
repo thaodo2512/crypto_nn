@@ -36,10 +36,12 @@ gate() {
 mkdir -p logs reports artifacts export
 
 # Quick mode to reduce runtime
+# When QUICK=1, force DAYS to a short horizon regardless of any pre-set DAYS
+# to guarantee smaller data pulls and faster iteration.
 if [[ "${QUICK:-0}" == "1" ]]; then
-  export DAYS=${DAYS:-7}
-  export SAMPLE=${SAMPLE:-512}
-  log "QUICK=1 enabled: DAYS=${DAYS} SAMPLE=${SAMPLE}"
+  export DAYS="${QUICK_DAYS:-7}"
+  export SAMPLE="${QUICK_SAMPLE:-512}"
+  log "QUICK=1 enabled: override DAYS=${DAYS} SAMPLE=${SAMPLE}"
 fi
 
 # P1
