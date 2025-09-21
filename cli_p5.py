@@ -340,10 +340,17 @@ def _nll(logits: np.ndarray, y: np.ndarray, T: float) -> float:
     return float(ll.mean())
 
 
-def _load_probs(glob: str) -> pd.DataFrame:
+def _load_probs(path_or_glob: str) -> pd.DataFrame:
+    # Accept a directory path (read all parquet files) or a glob pattern
+    import os
+    p = Path(path_or_glob)
+    if p.exists() and p.is_dir():
+        pat = str(p / "*.parquet")
+    else:
+        pat = path_or_glob
     con = duckdb.connect()
     try:
-        df = con.execute(f"SELECT * FROM read_parquet('{glob}')").df()
+        df = con.execute(f"SELECT * FROM read_parquet('{pat}')").df()
     finally:
         con.close()
     if "ts" in df.columns:
