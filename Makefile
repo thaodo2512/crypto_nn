@@ -244,7 +244,7 @@ gcp-docker-build:
 
 gcp-train:
 	@set -euxo pipefail; \
-	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"bash ~/repo/scripts/train_compose.sh\"; else nohup bash ~/repo/scripts/train_compose.sh > ~/train.log 2>&1 < /dev/null & fi'"; \
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
 	echo "Training started (docker compose). Use make gcp-tail to follow logs."
 
 gcp-wait-train:
