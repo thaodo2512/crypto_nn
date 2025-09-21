@@ -343,6 +343,6 @@ gcp-train-remote:
 gcp-train-remote-multi:
 	@set -euxo pipefail; \
 	REMOTE_ENV="SYMS='$(SYMS)' TF='$(TF)' WINDOW='$(WINDOW)' H='$(H)' DAYS='$(DAYS)' QUICK='$(QUICK)'"; \
-	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"$$REMOTE_ENV bash ~/repo/scripts/train_multi.sh\\\"\"; else nohup sg docker -c \"$$REMOTE_ENV bash ~/repo/scripts/train_multi.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
+	gcloud compute ssh --tunnel-through-iap --project="$(GCP_PROJECT)" --zone="$(GCP_ZONE)" "$(GCP_NAME)" --command="bash -lc 'sudo groupadd -f docker; sudo usermod -aG docker $$USER || true; if command -v tmux >/dev/null 2>&1; then tmux new -d -s train \"sg docker -c \\\"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\\\"\"; else nohup sg docker -c \"$$REMOTE_ENV bash ~/repo/scripts/train_compose.sh\" > ~/train.log 2>&1 < /dev/null & fi'"; \
 	echo "Remote multi-symbol training started with $$REMOTE_ENV"
 SHELL := /bin/bash
