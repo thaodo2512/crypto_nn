@@ -355,6 +355,7 @@ def calibrate(
     probs: str = typer.Option(..., "--probs", help="Per-fold logits/probs parquet glob with columns [fold_id, split, ts, y, logits_* or p_*]"),
     method: str = typer.Option("temperature", "--method"),
     out: str = typer.Option("models/calib.json", "--out"),
+    verbose: bool = typer.Option(False, "--verbose"),
 ) -> None:
     df = _load_probs(probs)
     # Expect columns: fold_id, split in {val,oos}, y (int), and either logits_0..2 or p_0..2
@@ -363,6 +364,7 @@ def calibrate(
     for fid in folds:
         sub = df[df.get("fold_id", 0) == fid]
         val = sub[sub.get("split", "val") == "val"]
+        typer.echo(f"[P6:calibrate] fold={fid} val_rows={len(val)} oos_rows={(sub.get('split','oos')=='oos').sum() if hasattr(sub.get('split',''), 'sum') else 0}")
         if any(c.startswith("logits_") for c in val.columns):
             logits = val[[c for c in val.columns if c.startswith("logits_")]].to_numpy()
         elif any(c.startswith("p_") for c in val.columns):
@@ -375,6 +377,10 @@ def calibrate(
         else:
             raise typer.BadParameter("Missing logits_ or p_ columns")
         yv = val["y"].to_numpy().astype(int)
+        if verbose:
+            import numpy as _np
+            _vc = {int(k): int(v) for k, v in zip(*_np.unique(yv, return_counts=True))}
+            typer.echo(f"[P6:calibrate] fold={fid} label_dist={_vc}")
         bestT = 1.0
         bestNLL = 1e9
         for T in np.linspace(0.5, 5.0, 91):
@@ -385,6 +391,7 @@ def calibrate(
         pv = _softmax(logits, T=bestT)
         ece = _ece_top(pv, yv)
         calib[str(fid)] = {"temperature": bestT, "ece_val": ece, "nll_val": bestNLL}
+        typer.echo(f"[P6:calibrate] fold={fid} T={bestT:.3f} ece_val={ece:.3f} nll_val={bestNLL:.3f}")
     Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
         json.dump(calib, f, indent=2)
@@ -418,6 +425,7 @@ def ensemble(
     weight_by: str = typer.Option("EV", "--weight-by"),
     out: str = typer.Option("models/ensemble_5m.json", "--out"),
     cost_bps: float = typer.Option(5.0, "--cost_bps"),
+    verbose: bool = typer.Option(False, "--verbose"),
 ) -> None:
     with open(calib, "r") as f:
         cal = json.load(f)
@@ -429,6 +437,7 @@ def ensemble(
     y = oos["y"].to_numpy().astype(int)
     for fid in folds:
         sub = oos[oos.get("fold_id", 0) == fid]
+        typer.echo(f"[P6:ensemble] fold={fid} oos_rows={len(sub)}")
         if any(c.startswith("logits_") for c in sub.columns):
             logits = sub[[c for c in sub.columns if c.startswith("logits_")]].to_numpy()
             T = float(cal.get(str(fid), {}).get("temperature", 1.0))
@@ -447,6 +456,8 @@ def ensemble(
         y_fold = sub["y"].to_numpy().astype(int)
         ev = _ev_trade(prob_folds[fid], y_fold, tau=0.5, cost_bps=cost_bps)
         evs.append(max(ev, 0.0))
+        if verbose:
+            typer.echo(f"[P6:ensemble] fold={fid} EV@0.5={ev:.4f}")
     evs = np.array(evs)
     if evs.sum() == 0:
         w = np.ones_like(evs) / len(evs)
@@ -457,6 +468,8 @@ def ensemble(
     with open(out, "w") as f:
         json.dump({"weights": weights, "calibration": cal}, f, indent=2)
     typer.echo(f"Ensemble weights saved to {out}")
+    if verbose:
+        typer.echo(f"[P6:ensemble] weights={weights}")
 
 
 @app.command("tune-threshold")
@@ -466,6 +479,7 @@ def tune_threshold(
     grid: str = typer.Option("0.50:0.80:0.025", "--grid"),
     cost_spec: str = typer.Option("bps:5", "--cost"),
     out: str = typer.Option("reports/p6_oos_summary.json", "--out"),
+    verbose: bool = typer.Option(False, "--verbose"),
 ) -> None:
     import matplotlib.pyplot as plt
 
@@ -497,6 +511,10 @@ def tune_threshold(
         y_blocks.append(sub["y"].to_numpy().astype(int))
     P_ens = np.vstack(P_blocks) if P_blocks else np.zeros((0, 3))
     y = np.concatenate(y_blocks) if y_blocks else np.array([], dtype=int)
+    if verbose:
+        import numpy as _np
+        _vc = {int(k): int(v) for k, v in zip(*_np.unique(y, return_counts=True))}
+        typer.echo(f"[P6:tune] oos_rows={len(y)} label_dist={_vc}")
 
     # Grid search tau
     start, end, step = [float(x) for x in grid.split(":")]

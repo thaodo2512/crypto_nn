@@ -156,7 +156,7 @@ def run(
             import pyarrow.parquet as pq
 
             pq.write_table(pa.Table.from_pandas(df, preserve_index=False), Path(out) / f"fold{fid}.parquet")
-        typer.echo(f"OOS probs written under {out}")
+        typer.echo(f"OOS probs written under {out} (fold={fid} val_rows={int(sel_val.sum())} oos_rows={len(oo_ids)})")
 
 
 @app.callback(invoke_without_command=True)
