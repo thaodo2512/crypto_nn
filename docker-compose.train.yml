@@ -61,7 +61,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p4.py iforest-train --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out data/masks/ifgate_${TF:-5m}.parquet --q 0.995 --rolling-days 30 --seed 42 --folds 5 && python cli_p4.py smote-windows --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --mask data/masks/ifgate_${TF:-5m}.parquet --W ${WINDOW:-144} --out data/aug/train_smote --seed 42 --folds 5 && python cli_p4.py report-classmix --pre data/train --post data/aug/train_smote --out reports/p4_classmix.json"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p4.py iforest-train --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out data/masks/${TF:-5m}/$$sym/ifgate.parquet --q 0.995 --rolling-days 30 --seed 42 --folds 5 && python cli_p4.py smote-windows --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --mask data/masks/${TF:-5m}/$$sym/ifgate.parquet --W ${WINDOW:-144} --out data/aug/train_smote/$$sym --seed 42 --folds 5 && python cli_p4.py report-classmix --pre data/train/$$sym --post data/aug/train_smote/$$sym --out reports/p4_classmix_$$sym.json"]
 
   p5_train:
     profiles: ["train"]
@@ -76,7 +76,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m} --seed 42 --folds 5"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json"]
 
   p5_train_gpu:
     profiles: ["train"]
@@ -95,7 +95,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m} --seed 42 --folds 5"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json"]
 
   p5_train_gpu_jetson:
     profiles: ["train"]
@@ -114,7 +114,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m} --seed 42 --folds 5"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py train --model gru --window ${WINDOW:-144} --cv walkforward --embargo 1D --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --out models/gru_${TF:-5m}/$$sym --seed 42 --folds 5 --folds-out artifacts/folds_$$sym.json"]
 
   p6_calibrate:
     profiles: ["train"]
@@ -129,7 +129,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","python cli_p5.py calibrate --probs 'artifacts/p5_oos_probs/*.parquet' --method temperature --out models/calib.json"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py calibrate --probs 'artifacts/p5_oos_probs/'"$$sym"'/*.parquet' --method temperature --out models/calib_"$$sym".json --verbose"]
 
   p6_ensemble:
     profiles: ["train"]
@@ -144,7 +144,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","python cli_p5.py ensemble --calib models/calib.json --probs 'artifacts/p5_oos_probs/*.parquet' --weight-by EV --out models/ensemble_5m.json --cost_bps 5"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py ensemble --calib models/calib_"$$sym".json --probs 'artifacts/p5_oos_probs/'"$$sym"'/*.parquet' --weight-by EV --out models/ensemble_5m_"$$sym".json --cost_bps 5 --verbose"]
 
   p6_thresholds:
     profiles: ["train"]
@@ -159,7 +159,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","python cli_p5.py tune-threshold --ensemble models/ensemble_5m.json --probs 'artifacts/p5_oos_probs/*.parquet' --grid 0.50:0.80:0.025 --cost bps:5 --out reports/p6_oos_summary.json"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python cli_p5.py tune-threshold --ensemble models/ensemble_5m_"$$sym".json --probs 'artifacts/p5_oos_probs/'"$$sym"'/*.parquet' --grid 0.50:0.80:0.025 --cost bps:5 --out reports/p6_oos_summary_"$$sym".json --verbose"]
 
   p5_oos_export:
     profiles: ["train"]
@@ -174,7 +174,7 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python p5_export_oos.py run --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --models-root models/gru_${TF:-5m} --out artifacts/p5_oos_probs --embargo 1D --folds 5 --window ${WINDOW:-144} --folds-json artifacts/folds.json"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python p5_export_oos.py run --features \"data/features/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --labels \"data/labels/${TF:-5m}/$$sym/y=*/m=*/d=*/part-*.parquet\" --models-root models/gru_${TF:-5m}/$$sym --out artifacts/p5_oos_probs/$$sym --embargo 1D --folds 5 --window ${WINDOW:-144} --folds-json artifacts/folds_$$sym.json"]
 
   p8_export:
     profiles: ["train"]
@@ -189,4 +189,4 @@ services:
       - ./reports:/workspace/reports
     env_file:
       - secrets/.env
-    command: ["bash","-lc","python -m app.export.cli_p8_export onnx --ckpt 'models/gru_${TF:-5m}/*/best.pt' --fp16 --out export/model_${TF:-5m}_fp16.onnx --preproc conf/preproc_5m.yaml --ensemble models/ensemble_5m.json --window ${WINDOW:-144} --sample 2048"]
+    command: ["bash","-lc","sym=$(echo ${SYMS:-BTCUSDT} | cut -d',' -f1); python -m app.export.cli_p8_export onnx --ckpt 'models/gru_${TF:-5m}/'"$$sym"'/*/best.pt' --fp16 --out export/model_${TF:-5m}_"$$sym"_fp16.onnx --preproc conf/preproc_5m.yaml --ensemble models/ensemble_5m_"$$sym".json --window ${WINDOW:-144} --sample 2048"]

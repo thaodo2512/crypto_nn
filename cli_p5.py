@@ -225,6 +225,7 @@ def train(
     out: str = typer.Option("models/gru_5m", "--out"),
     seed: int = typer.Option(42, "--seed"),
     folds_n: int = typer.Option(5, "--folds"),
+    folds_out: str = typer.Option("artifacts/folds.json", "--folds-out"),
 ) -> None:
     logger = logging.getLogger("p5")
     Path("logs").mkdir(exist_ok=True)
@@ -256,7 +257,7 @@ def train(
         ts_sorted_all = feat.sort_values(["symbol", "ts"]).reset_index(drop=True)["ts"]
         emit_folds_json(
             ts=ts_sorted_all,
-            out_path="artifacts/folds.json",
+            out_path=folds_out,
             tf="5m",
             symbol=str(feat["symbol"].mode().iloc[0]) if not feat.empty else "BTCUSDT",
             window=window,
