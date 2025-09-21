@@ -116,3 +116,21 @@ p6:
 p8:
 	docker compose -f docker-compose.train.yml --profile train run --rm p8_export
 	docker compose -f docker-compose.train.yml --profile train run --rm p1_ingest python scripts/validators/p8_gate.py
+
+.PHONY: clean-artifacts clean-old
+clean-artifacts:
+	bash scripts/cleanup.sh --purge-artifacts --yes
+
+# Usage: make clean-old SYM=BTCUSDT TF=5m KEEP_DAYS=60 WHAT=features|raw|both
+clean-old:
+	@if [ "$(WHAT)" = "raw" ]; then \
+	  KEEP_DAYS=$(KEEP_DAYS) SYM=$(SYM) TF=$(TF) bash scripts/cleanup.sh --prune-raw --yes; \
+	elif [ "$(WHAT)" = "both" ]; then \
+	  KEEP_DAYS=$(KEEP_DAYS) SYM=$(SYM) TF=$(TF) bash scripts/cleanup.sh --prune-features --prune-raw --yes; \
+	else \
+	  KEEP_DAYS=$(KEEP_DAYS) SYM=$(SYM) TF=$(TF) bash scripts/cleanup.sh --prune-features --yes; \
+	fi
+
+.PHONY: keep-best-model
+keep-best-model:
+	SYM=$(SYM) YES=1 bash scripts/cleanup.sh --keep-best-model --yes
