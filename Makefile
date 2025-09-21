@@ -285,3 +285,4 @@ gcp-one:
 	$(MAKE) gcp-wait-train; \
 	$(MAKE) gcp-pull; \
 	if [ "$$GCP_KEEP_VM" != "1" ] 2>/dev/null; then $(MAKE) gcp-destroy; if [ "$$GCP_USE_IP" = "1" ] 2>/dev/null; then $(MAKE) gcp-release-ip; fi; fi
+SHELL := /bin/bash
