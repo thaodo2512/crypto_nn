@@ -571,9 +571,12 @@ def ensemble(
     else:
         w = evs / evs.sum()
     weights = {str(fid): float(w[i]) for i, fid in enumerate(folds)}
+    # Derive a single representative temperature for P8 export (weighted by fold weights)
+    temps = {int(fid): float(cal.get(str(fid), {}).get("temperature", 1.0)) for fid in folds}
+    T = float(sum(weights[str(fid)] * temps[int(fid)] for fid in folds)) if weights else 1.0
     Path(Path(out).parent).mkdir(parents=True, exist_ok=True)
     with open(out, "w") as f:
-        json.dump({"weights": weights, "calibration": cal}, f, indent=2)
+        json.dump({"weights": weights, "calibration": cal, "temperature": T}, f, indent=2)
     typer.echo(f"Ensemble weights saved to {out}")
     if verbose:
         typer.echo(f"[P6:ensemble] weights={weights}")
