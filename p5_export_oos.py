@@ -39,6 +39,7 @@ def run(
     folds_n: int = typer.Option(5, "--folds"),
     window: int = typer.Option(144, "--window"),
     folds_json: str = typer.Option("artifacts/folds.json", "--folds-json"),
+    val_bars: int = typer.Option(144, "--val-bars", help="Fallback validation bars if folds.json has empty VAL"),
 ) -> None:
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
@@ -101,12 +102,12 @@ def run(
                 emb_td = pd.to_timedelta("1D")
             oos_start_ts = meta.iloc[oo_ids[0]]["ts"]
             cutoff = oos_start_ts - emb_td
-            # take up to 144 decision rows before cutoff
-            window_minutes = 5 * 144
+            # take up to val_bars decision rows before cutoff
+            window_minutes = 5 * int(val_bars)
             val_mask = (meta["ts"] <= cutoff) & (meta["ts"] > cutoff - pd.Timedelta(minutes=window_minutes))
             if not val_mask.any() and tr_ids.size:
-                # fall back: last up to 144 from train indices
-                keep = int(min(144, tr_ids.size))
+                # fall back: last up to val_bars from train indices
+                keep = int(min(int(val_bars), tr_ids.size))
                 vidx = tr_ids[-keep:]
             else:
                 vidx = np.where(val_mask.to_numpy())[0]

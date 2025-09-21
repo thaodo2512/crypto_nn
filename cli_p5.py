@@ -267,6 +267,7 @@ def train(
     window: int = typer.Option(144, "--window"),
     cv: str = typer.Option("walkforward", "--cv"),
     embargo: str = typer.Option("1D", "--embargo"),
+    val_bars: int = typer.Option(144, "--val-bars", help="Validation bars per fold when emitting folds.json"),
     features: str = typer.Option(..., "--features"),
     labels: str = typer.Option(..., "--labels"),
     out: str = typer.Option("models/gru_5m", "--out"),
@@ -313,7 +314,7 @@ def train(
             embargo_bars=BARS_PER_DAY,
             n_folds=folds_n,
             min_oos=BARS_PER_DAY,
-            val_bars=window,
+            val_bars=int(val_bars),
         )
     except Exception as e:
         logger.warning(f"Failed to emit artifacts/folds.json: {e}")
