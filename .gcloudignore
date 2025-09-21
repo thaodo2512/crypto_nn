@@ -1,0 +1,34 @@
+# Exclude heavy or irrelevant items from repo push
+.git/
+.gitignore
+.gcloudignore
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.mypy_cache/
+.pytest_cache/
+.cache/
+*.ipynb_checkpoints/
+
+# Generated artifacts and data
+artifacts/
+data/
+models/
+export/
+logs/
+reports/
+dist/
+build/
+.build/
+node_modules/
+*.egg-info/
+.eggs/
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
+

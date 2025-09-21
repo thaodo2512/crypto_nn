@@ -17,6 +17,18 @@ Small Python 3.11 pipeline to ingest CoinGlass v4 endpoints and build 5‑minute
   - Explain P10: `python explain_p10.py api --port 8081`
   - Monitor P11: see Phase P11 commands below
 
+### Cloud Training (one command via gcloud + IAP)
+- One-shot pipeline (create → wait → push → optional Docker build → train → wait → pull → optional destroy):
+  - `make gcp-one GCP_NAME=train-$(date +%Y%m%d-%H%M%S)`
+- Options:
+  - Attach static IP: `GCP_USE_IP=1 make gcp-one`
+  - Keep VM after run: `GCP_KEEP_VM=1 make gcp-one`
+  - Build Docker remotely if Dockerfile exists: `GCP_DOCKER_BUILD=1 make gcp-one`
+  - Timeout for training wait (seconds): `GCP_TIMEOUT=10800 make gcp-one`
+- Prereqs: install `gcloud`, login (`gcloud auth login`), and set defaults:
+  - `gcloud config set project valiant-epsilon-472304-r9 && gcloud config set compute/region us-central1 && gcloud config set compute/zone us-central1-c`
+  - Ensure IAP tunneling is enabled and you have role `roles/iap.tunnelResourceAccessor`.
+
 ## Phase P2 – 5m Feature Builder
 - Build features (from P1 5m bars):
   - Docker: `docker compose run --rm features_build`
