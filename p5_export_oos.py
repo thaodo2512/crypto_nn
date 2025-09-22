@@ -41,6 +41,7 @@ def run(
     folds_json: str = typer.Option("artifacts/folds.json", "--folds-json"),
     val_bars: int = typer.Option(144, "--val-bars", help="Fallback validation bars if folds.json has empty VAL"),
 ) -> None:
+    typer.echo(f"[P5:oos_export] features={features} labels={labels} models_root={models_root} out={out} embargo={embargo} folds={folds_n} window={window} folds_json={folds_json} val_bars={val_bars}")
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
     X, y, meta = build_windows(feat, lab, W=window)

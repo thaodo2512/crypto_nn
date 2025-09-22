@@ -282,6 +282,8 @@ def train(
     fh.setLevel(logging.INFO)
     logger.addHandler(fh)
     logger.setLevel(logging.INFO)
+    typer.echo(f"[P5:train] model={model} window={window} cv={cv} embargo={embargo} val_bars={val_bars} folds={folds_n} seed={seed}")
+    typer.echo(f"[P5:train] features={features}\n[P5:train] labels={labels}\n[P5:train] out={out} folds_out={folds_out} smote_dir={smote_dir or 'None'}")
 
     _set_seed(seed)
     # Use all CPU threads when not using CUDA

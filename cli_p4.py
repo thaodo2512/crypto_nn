@@ -55,6 +55,7 @@ def iforest_train(
     folds_n: int = typer.Option(5, "--folds"),
 ) -> None:
     logger = _setup_log()
+    typer.echo(f"[P4:iforest] features={features} labels={labels} out={out} q={q} rolling_days={rolling_days} seed={seed} folds={folds_n}")
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
     typer.echo(f"[P4] IF gate: features rows={len(feat):,}, labels rows={len(lab):,}")
@@ -84,6 +85,7 @@ def smote_windows(
     folds_n: int = typer.Option(5, "--folds"),
 ) -> None:
     logger = _setup_log()
+    typer.echo(f"[P4:smote] features={features} labels={labels} mask={mask} W={W} out={out} seed={seed} folds={folds_n}")
     feat = _read_parquet(features)
     lab = _read_parquet(labels)
     mask_df = _read_parquet(mask)
@@ -122,6 +124,7 @@ def report_classmix(
     post: str = typer.Option("data/aug/train_smote", "--post"),
     out: str = typer.Option("reports/p4_classmix.json", "--out"),
 ) -> None:
+    typer.echo(f"[P4:report] pre={pre} post={post} out={out}")
     # Load per-fold counts produced by apply_per_fold
     with open(Path(pre) / "counts.json") as f:
         counts = json.load(f)

@@ -130,6 +130,7 @@ def triple_barrier(
 ) -> None:
     if tf.lower() != "5m":
         raise typer.BadParameter("Only 5m timeframe is supported")
+    typer.echo(f"[P3:label] features={features} raw={raw or 'None'} out={out} tf={tf} k={k} H={H} atr_window={atr_window}")
     cols_req = ["ts", "symbol", "open", "high", "low", "close"]
     df = _read_parquet_glob(features)
     # If OHLC missing and raw provided, join OHLC from raw lake

@@ -258,6 +258,7 @@ def build(
     winsor_low: float = typer.Option(0.01, "--winsor_low", help="Causal winsorize lower quantile"),
     winsor_high: float = typer.Option(0.99, "--winsor_high", help="Causal winsorize upper quantile"),
 ) -> None:
+    typer.echo(f"[P2:build] glob={glob} out={out} warmup={warmup} winsor=[{winsor_low},{winsor_high}]")
     t0 = time.perf_counter()
     raw = read_parquet_glob(glob)
     if raw.empty:

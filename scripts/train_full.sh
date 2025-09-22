@@ -35,6 +35,38 @@ fi
 run_service() {
   local svc="$1"; shift || true
   log "Running service: ${svc}"
+  case "$svc" in
+    p1_ingest)
+      log "P1 params: SYMS=${SYMS:-BTCUSDT} TF=${TF:-5m} DAYS=${DAYS:-90}"
+      ;;
+    p2_features)
+      log "P2 params: SYMS=${SYMS:-BTCUSDT} TF=${TF:-5m}"
+      ;;
+    p3_label)
+      log "P3 params: SYMS=${SYMS:-BTCUSDT} H=${H:-36}"
+      ;;
+    p4_sampling)
+      log "P4 params: SYMS=${SYMS:-BTCUSDT} WINDOW=${WINDOW:-144}"
+      ;;
+    p5_train|p5_train_gpu|p5_train_gpu_jetson)
+      log "P5 params: SYMS=${SYMS:-BTCUSDT} WINDOW=${WINDOW:-144} VAL_BARS=${VAL_BARS:-288} FOLDS=5"
+      ;;
+    p5_oos_export)
+      log "P5:oos_export params: SYMS=${SYMS:-BTCUSDT} WINDOW=${WINDOW:-144}"
+      ;;
+    p6_calibrate)
+      log "P6:calibrate params: SYMS=${SYMS:-BTCUSDT}"
+      ;;
+    p6_ensemble)
+      log "P6:ensemble params: SYMS=${SYMS:-BTCUSDT}"
+      ;;
+    p6_thresholds)
+      log "P6:tune params: SYMS=${SYMS:-BTCUSDT}"
+      ;;
+    p8_export)
+      log "P8:export params: SYMS=${SYMS:-BTCUSDT} WINDOW=${WINDOW:-144}"
+      ;;
+  esac
   docker compose -f docker-compose.train.yml --profile train run --rm "${svc}" "$@"
 }
 
