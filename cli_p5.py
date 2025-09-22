@@ -316,6 +316,14 @@ def train(
             min_oos=BARS_PER_DAY,
             val_bars=int(val_bars),
         )
+        # Also write canonical path artifacts/folds.json so validators can find it
+        try:
+            import shutil as _sh
+            Path("artifacts").mkdir(parents=True, exist_ok=True)
+            if Path(folds_out).exists() and Path(folds_out) != Path("artifacts/folds.json"):
+                _sh.copyfile(folds_out, "artifacts/folds.json")
+        except Exception as ce:
+            logger.warning(f"Failed to copy folds.json to canonical path: {ce}")
     except Exception as e:
         logger.warning(f"Failed to emit artifacts/folds.json: {e}")
 
